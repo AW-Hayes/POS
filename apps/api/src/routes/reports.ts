@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticate, requireRole } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
@@ -153,6 +154,164 @@ reportsRouter.get('/end-of-day', async (req, res, next) => {
             ? s.closingCash - s.expectedCash
             : null,
         })),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Salesperson report ───────────────────────────────────────────────────────
+
+reportsRouter.get('/salesperson', async (req, res, next) => {
+  try {
+    const from = qs(req.query.from);
+    const to = qs(req.query.to);
+    const salespersonId = qs(req.query.salespersonId);
+
+    if (!from || !to) throw new AppError(400, 'from and to dates are required');
+
+    const where = {
+      tenantId: req.user!.tenantId,
+      status: 'completed' as const,
+      completedAt: { gte: new Date(from), lte: new Date(to) },
+      ...(salespersonId ? { salespersonId } : { salespersonId: { not: null } }),
+    };
+
+    const orders = await prisma.order.findMany({
+      where,
+      select: {
+        id: true,
+        total: true,
+        salespersonId: true,
+        salesperson: { select: { id: true, name: true } },
+        completedAt: true,
+      },
+    });
+
+    const byRep: Record<string, { salesperson: { id: string; name: string }; orderCount: number; totalRevenue: number }> = {};
+    for (const o of orders) {
+      if (!o.salespersonId || !o.salesperson) continue;
+      if (!byRep[o.salespersonId]) {
+        byRep[o.salespersonId] = { salesperson: o.salesperson, orderCount: 0, totalRevenue: 0 };
+      }
+      byRep[o.salespersonId].orderCount++;
+      byRep[o.salespersonId].totalRevenue += o.total;
+    }
+
+    res.json({ success: true, data: Object.values(byRep) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── X-Report (read without closing) ─────────────────────────────────────────
+
+reportsRouter.get('/x-tape', async (req, res, next) => {
+  try {
+    const sessionId = qs(req.query.sessionId);
+    const locationId = qs(req.query.locationId);
+    const date = qs(req.query.date) ?? new Date().toISOString().slice(0, 10);
+
+    const dayStart = new Date(`${date}T00:00:00.000Z`);
+    const dayEnd = new Date(`${date}T23:59:59.999Z`);
+
+    const where = {
+      tenantId: req.user!.tenantId,
+      status: 'completed' as const,
+      completedAt: { gte: dayStart, lte: dayEnd },
+      ...(locationId ? { locationId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    };
+
+    const orders = await prisma.order.findMany({
+      where,
+      include: { payments: true, user: { select: { id: true, name: true } } },
+    });
+
+    const cashDrops = sessionId
+      ? await prisma.cashDrop.findMany({ where: { sessionId }, orderBy: { createdAt: 'asc' } })
+      : [];
+
+    const paymentBreakdown: Record<string, number> = {};
+    for (const o of orders) {
+      for (const p of o.payments) {
+        paymentBreakdown[p.method] = (paymentBreakdown[p.method] ?? 0) + p.amount;
+      }
+    }
+
+    const totalCash = paymentBreakdown['cash'] ?? 0;
+    const totalDrops = cashDrops.reduce((s, d) => s + d.amount, 0);
+
+    res.json({
+      success: true,
+      data: {
+        type: 'X',
+        date,
+        sessionId,
+        orderCount: orders.length,
+        totalRevenue: orders.reduce((s, o) => s + o.total, 0),
+        paymentBreakdown,
+        cashInDrawer: totalCash - totalDrops,
+        cashDrops: totalDrops,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Z-Report (close session read) ────────────────────────────────────────────
+
+reportsRouter.post('/z-tape', async (req, res, next) => {
+  try {
+    const { sessionId } = z.object({ sessionId: z.string() }).parse(req.body);
+
+    const session = await prisma.registerSession.findFirst({
+      where: {
+        id: sessionId,
+        register: { location: { tenantId: req.user!.tenantId } },
+        closedAt: null,
+      },
+      include: { register: { include: { location: true } } },
+    });
+    if (!session) throw new AppError(404, 'Open session not found');
+
+    const orders = await prisma.order.findMany({
+      where: { sessionId, status: 'completed' },
+      include: { payments: true },
+    });
+
+    const cashDrops = await prisma.cashDrop.findMany({ where: { sessionId } });
+
+    const paymentBreakdown: Record<string, number> = {};
+    for (const o of orders) {
+      for (const p of o.payments) {
+        paymentBreakdown[p.method] = (paymentBreakdown[p.method] ?? 0) + p.amount;
+      }
+    }
+
+    const totalCash = paymentBreakdown['cash'] ?? 0;
+    const totalDrops = cashDrops.reduce((s, d) => s + d.amount, 0);
+    const expectedCash = session.openingCash + totalCash - totalDrops;
+
+    // Close the session
+    const closed = await prisma.registerSession.update({
+      where: { id: session.id },
+      data: { closedAt: new Date(), expectedCash },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        type: 'Z',
+        session: closed,
+        orderCount: orders.length,
+        totalRevenue: orders.reduce((s, o) => s + o.total, 0),
+        paymentBreakdown,
+        openingCash: session.openingCash,
+        cashDrops: totalDrops,
+        expectedCash,
       },
     });
   } catch (err) {

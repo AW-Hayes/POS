@@ -17,6 +17,7 @@ import { PriceLevelsPage } from '@/pages/PriceLevelsPage';
 import { GiftCardsPage } from '@/pages/GiftCardsPage';
 import { EstimatesPage } from '@/pages/EstimatesPage';
 import { LayawayPage } from '@/pages/LayawayPage';
+import { TimeClockPage } from '@/pages/TimeClockPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -50,6 +51,7 @@ export default function App() {
           <Route path="gift-cards" element={<GiftCardsPage />} />
           <Route path="estimates" element={<EstimatesPage />} />
           <Route path="layaway" element={<LayawayPage />} />
+          <Route path="time-clock" element={<TimeClockPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>

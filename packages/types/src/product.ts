@@ -48,6 +48,26 @@ export interface ProductVariant {
   updatedAt: string;
 }
 
+export interface PriceBreak {
+  id: string;
+  productId: string;
+  variantId?: string;
+  minQty: number;
+  price: number;
+}
+
+export interface SerialNumber {
+  id: string;
+  productId: string;
+  variantId?: string;
+  serial: string;
+  status: 'available' | 'sold' | 'returned';
+  orderItemId?: string;
+  purchaseOrderId?: string;
+  createdAt: string;
+  soldAt?: string;
+}
+
 export interface Product {
   id: string;
   tenantId: string;
@@ -66,8 +86,10 @@ export interface Product {
   sortOrder: number;
   requiresAgeVerification: boolean;
   minAge?: number;
+  preferredVendorId?: string;
   attributes: ProductAttribute[];
   variants: ProductVariant[];
+  priceBreaks?: PriceBreak[];
   createdAt: string;
   updatedAt: string;
 }
@@ -86,6 +108,7 @@ export interface CreateProductRequest {
   attributeIds?: string[];
   requiresAgeVerification?: boolean;
   minAge?: number;
+  preferredVendorId?: string;
 }
 
 export interface GenerateVariantsRequest {

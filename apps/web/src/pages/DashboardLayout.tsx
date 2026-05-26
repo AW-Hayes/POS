@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import {
   LayoutDashboard, ShoppingCart, Package, Warehouse, ClipboardList,
   Users, Settings, LogOut, ShoppingBag, BarChart3, Building2,
-  Truck, Tag, Layers, CreditCard, FileText, Archive,
+  Truck, Tag, Layers, CreditCard, FileText, Archive, Clock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -23,6 +23,7 @@ const navItems = [
   { to: '/layaway', label: 'Layaway', icon: Archive },
   { to: '/vendors', label: 'Vendors', icon: Building2 },
   { to: '/purchase-orders', label: 'Purchase Orders', icon: Truck },
+  { to: '/time-clock', label: 'Time Clock', icon: Clock },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 

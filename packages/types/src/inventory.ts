@@ -15,6 +15,8 @@ export interface InventoryItem {
   variantId?: string;
   quantity: number;
   lowStockAt?: number;
+  reorderPoint?: number;
+  reorderQty?: number;
   updatedAt: string;
 }
 

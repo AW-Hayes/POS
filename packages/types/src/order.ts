@@ -11,8 +11,34 @@ export interface Customer {
   taxExempt: boolean;
   taxExemptCertificate?: string;
   priceLevelId?: string;
+  loyaltyPoints: number;
+  arBalance: number;
+  creditLimit?: number;
+  emailReceiptsEnabled: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface LoyaltyTransaction {
+  id: string;
+  customerId: string;
+  userId?: string;
+  orderId?: string;
+  type: 'earn' | 'redeem' | 'adjust' | 'expire';
+  points: number;
+  note?: string;
+  createdAt: string;
+}
+
+export interface TimeEntry {
+  id: string;
+  userId: string;
+  tenantId: string;
+  type: 'work' | 'break';
+  clockIn: string;
+  clockOut?: string;
+  note?: string;
+  createdAt: string;
 }
 
 export interface OrderItem {
@@ -58,6 +84,7 @@ export interface Order {
   heldName?: string;
   /** Expiration date for estimates/quotes. */
   estimateExpiresAt?: string;
+  salespersonId?: string;
   items: OrderItem[];
   payments: Payment[];
   layawayDeposits?: LayawayDeposit[];

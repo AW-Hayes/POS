@@ -26,6 +26,13 @@ import { heldOrdersRouter } from './routes/held-orders';
 import { estimatesRouter } from './routes/estimates';
 import { layawayRouter } from './routes/layaway';
 import { cashDropsRouter } from './routes/cash-drops';
+import { loyaltyRouter } from './routes/loyalty';
+import { houseAccountsRouter } from './routes/house-accounts';
+import { receiptsRouter } from './routes/receipts';
+import { priceBreaksRouter } from './routes/price-breaks';
+import { serialNumbersRouter } from './routes/serial-numbers';
+import { labelsRouter } from './routes/labels';
+import { timeClockRouter } from './routes/time-clock';
 import { errorHandler } from './middleware/errorHandler';
 import { registerBuiltinHooks } from './hooks';
 
@@ -67,5 +74,12 @@ app.use('/api/held-orders', heldOrdersRouter);
 app.use('/api/estimates', estimatesRouter);
 app.use('/api/layaway', layawayRouter);
 app.use('/api/cash-drops', cashDropsRouter);
+app.use('/api/loyalty', loyaltyRouter);
+app.use('/api/house-accounts', houseAccountsRouter);
+app.use('/api/receipts', receiptsRouter);
+app.use('/api/price-breaks', priceBreaksRouter);
+app.use('/api/serial-numbers', serialNumbersRouter);
+app.use('/api/labels', labelsRouter);
+app.use('/api/time-clock', timeClockRouter);
 
 app.use(errorHandler);
