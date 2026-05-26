@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { randomBytes } from 'crypto';
 import { prisma } from '../lib/prisma';
 import { authenticate, requireRole } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
@@ -55,10 +56,11 @@ giftCardsRouter.get('/lookup', async (req, res, next) => {
 
 function generateCode(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const bytes = randomBytes(16);
   let code = '';
   for (let i = 0; i < 16; i++) {
     if (i > 0 && i % 4 === 0) code += '-';
-    code += chars[Math.floor(Math.random() * chars.length)];
+    code += chars[bytes[i] % chars.length];
   }
   return code;
 }
@@ -113,13 +115,16 @@ giftCardsRouter.post('/:id/reload', requireRole('admin', 'manager'), async (req,
       note: z.string().optional(),
     }).parse(req.body);
 
-    const newBalance = card.balance + amount;
-    const [updated] = await prisma.$transaction([
-      prisma.giftCard.update({ where: { id: card.id }, data: { balance: newBalance } }),
-      prisma.giftCardTransaction.create({
-        data: { giftCardId: card.id, type: 'reload', amount, balanceAfter: newBalance, note },
-      }),
-    ]);
+    const updated = await prisma.$transaction(async (tx) => {
+      const reloaded = await tx.giftCard.update({
+        where: { id: card.id },
+        data: { balance: { increment: amount } },
+      });
+      await tx.giftCardTransaction.create({
+        data: { giftCardId: card.id, type: 'reload', amount, balanceAfter: reloaded.balance, note },
+      });
+      return reloaded;
+    });
 
     res.json({ success: true, data: updated });
   } catch (err) {

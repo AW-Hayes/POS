@@ -121,7 +121,10 @@ reportsRouter.get('/end-of-day', async (req, res, next) => {
 
     const sessions = await prisma.registerSession.findMany({
       where: {
-        register: locationId ? { locationId } : {},
+        register: {
+          location: { tenantId: req.user!.tenantId },
+          ...(locationId ? { locationId } : {}),
+        },
         openedAt: { gte: dayStart, lte: dayEnd },
         closedAt: { not: null },
       },

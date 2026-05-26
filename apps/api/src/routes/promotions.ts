@@ -84,7 +84,7 @@ const applySchema = z.object({
     productId: z.string(),
     categoryId: z.string().optional(),
     quantity: z.number().positive(),
-    price: z.number(),
+    price: z.number().min(0),
   })),
 });
 

@@ -188,6 +188,9 @@ ordersRouter.post('/', async (req, res, next) => {
       }
     }
 
+    // Cap promotion discount so total never goes below zero
+    const cappedPromotionDiscount = Math.min(promotionDiscount, subtotal + taxAmount);
+
     // ── hook: order:before-create ──────────────────────────────────────────────
     const beforeCtx = await hooks.run('order:before-create', {
       payload: {
@@ -198,7 +201,7 @@ ordersRouter.post('/', async (req, res, next) => {
         subtotal,
         taxAmount,
         discountAmount,
-        total: subtotal + taxAmount - promotionDiscount,
+        total: subtotal + taxAmount - cappedPromotionDiscount,
         customerId: data.customerId,
         sessionId: data.sessionId,
         notes: data.notes,
@@ -218,7 +221,7 @@ ordersRouter.post('/', async (req, res, next) => {
         subtotal: beforeCtx.payload.subtotal,
         taxAmount: beforeCtx.payload.taxAmount,
         discountAmount: beforeCtx.payload.discountAmount,
-        promotionDiscount,
+        promotionDiscount: cappedPromotionDiscount,
         total: beforeCtx.payload.total,
         items: { create: beforeCtx.payload.items },
       },
@@ -296,20 +299,24 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
     });
 
     const completed = await prisma.$transaction(async (tx) => {
-      // Deduct gift card balances
+      // Deduct gift card balances atomically (prevents overdraft under concurrent load)
       for (const p of payments) {
         if (p.method === 'gift_card' && p.giftCardId) {
-          const card = await tx.giftCard.findUnique({ where: { id: p.giftCardId } });
-          if (!card) throw new AppError(400, 'Gift card not found');
-          const newBalance = card.balance - p.amount;
-          await tx.giftCard.update({ where: { id: card.id }, data: { balance: newBalance } });
+          const result = await tx.giftCard.updateMany({
+            where: { id: p.giftCardId, tenantId: req.user!.tenantId, active: true, balance: { gte: p.amount } },
+            data: { balance: { decrement: p.amount } },
+          });
+          if (result.count === 0) {
+            throw new AppError(400, 'Gift card has insufficient balance or is no longer active');
+          }
+          const updated = await tx.giftCard.findUnique({ where: { id: p.giftCardId } });
           await tx.giftCardTransaction.create({
             data: {
-              giftCardId: card.id,
+              giftCardId: p.giftCardId,
               orderId: order.id,
               type: 'redeem',
               amount: p.amount,
-              balanceAfter: newBalance,
+              balanceAfter: updated!.balance,
             },
           });
         }

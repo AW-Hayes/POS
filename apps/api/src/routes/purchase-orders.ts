@@ -69,6 +69,15 @@ purchaseOrdersRouter.post('/', async (req, res, next) => {
     });
     if (!location) throw new AppError(404, 'Location not found');
 
+    const productIds = [...new Set(data.items.map((i) => i.productId))];
+    const validProducts = await prisma.product.findMany({
+      where: { id: { in: productIds }, tenantId: req.user!.tenantId },
+      select: { id: true },
+    });
+    if (validProducts.length !== productIds.length) {
+      throw new AppError(400, 'One or more products not found');
+    }
+
     const total = data.items.reduce((s, i) => s + i.orderedQty * i.unitCost, 0);
 
     const po = await prisma.purchaseOrder.create({

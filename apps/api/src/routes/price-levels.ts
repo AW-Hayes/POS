@@ -58,6 +58,14 @@ priceLevelsRouter.delete('/:id', requireRole('admin'), async (req, res, next) =>
       where: { id: req.params.id, tenantId: req.user!.tenantId },
     });
     if (!level) throw new AppError(404, 'Price level not found');
+
+    const customerCount = await prisma.customer.count({
+      where: { priceLevelId: req.params.id },
+    });
+    if (customerCount > 0) {
+      throw new AppError(400, `Cannot delete: ${customerCount} customer(s) are assigned to this price level`);
+    }
+
     await prisma.priceLevel.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (err) {

@@ -34,48 +34,54 @@ returnsRouter.post('/', async (req, res, next) => {
       throw new AppError(400, `Cannot return a ${order.status} order`);
     }
 
-    // Validate return quantities against order items
+    // Validate order items exist (fast pre-check before taking the transaction)
     for (const ri of data.items) {
-      const orderItem = order.items.find((i) => i.id === ri.orderItemId);
-      if (!orderItem) throw new AppError(400, `Order item ${ri.orderItemId} not found`);
-
-      const previouslyReturned = await prisma.orderReturnItem.aggregate({
-        where: { orderItemId: ri.orderItemId },
-        _sum: { quantity: true },
-      });
-      const alreadyReturned = previouslyReturned._sum.quantity ?? 0;
-      if (alreadyReturned + ri.quantity > orderItem.quantity) {
-        throw new AppError(400, `Cannot return more than ordered for item ${orderItem.name}`);
+      if (!order.items.find((i) => i.id === ri.orderItemId)) {
+        throw new AppError(400, `Order item ${ri.orderItemId} not found`);
       }
     }
 
     const tenant = await prisma.tenant.findUnique({ where: { id: req.user!.tenantId } });
     const defaultTaxRate = Number((tenant?.settings as Record<string, unknown>)?.taxRate ?? 0);
 
-    let subtotal = 0;
-    let taxAmount = 0;
-
-    const returnItems = data.items.map((ri) => {
-      const orderItem = order.items.find((i) => i.id === ri.orderItemId)!;
-      const lineSubtotal = orderItem.price * ri.quantity;
-      const lineTax = lineSubtotal * (orderItem.taxRate || defaultTaxRate);
-      subtotal += lineSubtotal;
-      taxAmount += lineTax;
-      return {
-        orderItemId: ri.orderItemId,
-        quantity: ri.quantity,
-        price: orderItem.price,
-        taxRate: orderItem.taxRate,
-        total: lineSubtotal + lineTax,
-      };
-    });
-
     const totalRefund = data.refunds.reduce((s, r) => s + r.amount, 0);
-    if (Math.abs(totalRefund - (subtotal + taxAmount)) > 0.01) {
-      throw new AppError(400, `Refund total (${totalRefund}) does not match return total (${subtotal + taxAmount})`);
-    }
 
     const orderReturn = await prisma.$transaction(async (tx) => {
+      // Validate quantities inside the transaction to prevent concurrent over-returns
+      for (const ri of data.items) {
+        const orderItem = order.items.find((i) => i.id === ri.orderItemId)!;
+        const previouslyReturned = await tx.orderReturnItem.aggregate({
+          where: { orderItemId: ri.orderItemId },
+          _sum: { quantity: true },
+        });
+        const alreadyReturned = previouslyReturned._sum.quantity ?? 0;
+        if (alreadyReturned + ri.quantity > orderItem.quantity) {
+          throw new AppError(400, `Cannot return more than ordered for item "${orderItem.name}"`);
+        }
+      }
+
+      let subtotal = 0;
+      let taxAmount = 0;
+
+      const returnItems = data.items.map((ri) => {
+        const orderItem = order.items.find((i) => i.id === ri.orderItemId)!;
+        const lineSubtotal = orderItem.price * ri.quantity;
+        const lineTax = lineSubtotal * (orderItem.taxRate || defaultTaxRate);
+        subtotal += lineSubtotal;
+        taxAmount += lineTax;
+        return {
+          orderItemId: ri.orderItemId,
+          quantity: ri.quantity,
+          price: orderItem.price,
+          taxRate: orderItem.taxRate,
+          total: lineSubtotal + lineTax,
+        };
+      });
+
+      if (Math.abs(totalRefund - (subtotal + taxAmount)) > 0.01) {
+        throw new AppError(400, `Refund total (${totalRefund}) does not match return total (${subtotal + taxAmount})`);
+      }
+
       const ret = await tx.orderReturn.create({
         data: {
           orderId: data.orderId,

@@ -70,12 +70,12 @@ sessionsRouter.post('/:id/close', async (req, res, next) => {
         id: req.params.id,
         register: { location: { tenantId: req.user!.tenantId } },
       },
-      include: { orders: { include: { payments: true } } },
+      include: { orders: { where: { status: 'completed' }, include: { payments: true } } },
     });
     if (!session) throw new AppError(404, 'Session not found');
     if (session.closedAt) throw new AppError(400, 'Session is already closed');
 
-    // Calculate expected cash: opening + all cash payments from session orders
+    // Only completed orders have been paid — voided orders are excluded
     const cashIn = session.orders
       .flatMap((o) => o.payments)
       .filter((p) => p.method === 'cash')
