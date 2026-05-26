@@ -9,6 +9,12 @@ import { InventoryPage } from '@/pages/InventoryPage';
 import { OrdersPage } from '@/pages/OrdersPage';
 import { CustomersPage } from '@/pages/CustomersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { ReportsPage } from '@/pages/ReportsPage';
+import { VendorsPage } from '@/pages/VendorsPage';
+import { PurchaseOrdersPage } from '@/pages/PurchaseOrdersPage';
+import { PromotionsPage } from '@/pages/PromotionsPage';
+import { PriceLevelsPage } from '@/pages/PriceLevelsPage';
+import { GiftCardsPage } from '@/pages/GiftCardsPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -34,6 +40,12 @@ export default function App() {
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="orders" element={<OrdersPage />} />
           <Route path="customers" element={<CustomersPage />} />
+          <Route path="reports" element={<ReportsPage />} />
+          <Route path="vendors" element={<VendorsPage />} />
+          <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
+          <Route path="promotions" element={<PromotionsPage />} />
+          <Route path="price-levels" element={<PriceLevelsPage />} />
+          <Route path="gift-cards" element={<GiftCardsPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>

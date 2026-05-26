@@ -13,6 +13,9 @@ const customerSchema = z.object({
   email: z.string().email().optional(),
   phone: z.string().optional(),
   notes: z.string().optional(),
+  taxExempt: z.boolean().optional(),
+  taxExemptCertificate: z.string().optional(),
+  priceLevelId: z.string().optional(),
 });
 
 customersRouter.get('/', async (req, res, next) => {

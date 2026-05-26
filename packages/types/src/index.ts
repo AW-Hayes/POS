@@ -4,3 +4,7 @@ export * from './product';
 export * from './inventory';
 export * from './order';
 export * from './common';
+export * from './vendor';
+export * from './promotion';
+export * from './gift-card';
+export * from './returns';

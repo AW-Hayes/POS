@@ -56,6 +56,7 @@ const createOrderSchema = z.object({
   sessionId: z.string().optional(),
   customerId: z.string().optional(),
   notes: z.string().optional(),
+  promotionIds: z.array(z.string()).default([]),
   items: z.array(z.object({
     productId: z.string(),
     variantId: z.string().optional(),
@@ -80,9 +81,21 @@ ordersRouter.post('/', async (req, res, next) => {
     const productIds = [...new Set(data.items.map((i) => i.productId))];
     const products = await prisma.product.findMany({
       where: { id: { in: productIds }, tenantId: req.user!.tenantId, active: true },
-      include: { variants: true },
+      include: { variants: true, category: { select: { id: true } } },
     });
     const productMap = new Map(products.map((p) => [p.id, p]));
+
+    // Load customer for tax exempt + price level
+    const customer = data.customerId
+      ? await prisma.customer.findFirst({
+          where: { id: data.customerId, tenantId: req.user!.tenantId },
+          include: {
+            priceLevel: { include: { prices: true } },
+          },
+        })
+      : null;
+    const isTaxExempt = customer?.taxExempt ?? false;
+    const priceLevel = customer?.priceLevel ?? null;
 
     let subtotal = 0;
     let taxAmount = 0;
@@ -95,8 +108,21 @@ ordersRouter.post('/', async (req, res, next) => {
       const variant = item.variantId ? product.variants.find((v) => v.id === item.variantId) : undefined;
       if (item.variantId && !variant) throw new AppError(400, `Variant ${item.variantId} not found`);
 
-      const unitPrice = variant?.price ?? product.price;
-      const taxRate = product.taxable ? defaultTaxRate : 0;
+      let unitPrice = variant?.price ?? product.price;
+
+      // Apply price level override
+      if (priceLevel) {
+        const specificPrice = priceLevel.prices.find(
+          (p) => p.productId === item.productId && p.variantId === (item.variantId ?? null),
+        );
+        if (specificPrice) {
+          unitPrice = specificPrice.price;
+        } else if (priceLevel.discount > 0) {
+          unitPrice = unitPrice * (1 - priceLevel.discount / 100);
+        }
+      }
+
+      const taxRate = product.taxable && !isTaxExempt ? defaultTaxRate : 0;
       const discountPerUnit = Math.min(item.discount, unitPrice);
       const lineDiscount = discountPerUnit * item.quantity;
       const lineSubtotal = unitPrice * item.quantity - lineDiscount;
@@ -119,6 +145,52 @@ ordersRouter.post('/', async (req, res, next) => {
       };
     });
 
+    // Apply promotions
+    let promotionDiscount = 0;
+    if (data.promotionIds.length > 0) {
+      const now = new Date();
+      const promotions = await prisma.promotion.findMany({
+        where: {
+          id: { in: data.promotionIds },
+          tenantId: req.user!.tenantId,
+          active: true,
+          OR: [{ startsAt: null }, { startsAt: { lte: now } }],
+          AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: now } }] }],
+        },
+      });
+
+      for (const promo of promotions) {
+        for (const item of orderItems) {
+          const product = productMap.get(item.productId)!;
+          const matches =
+            promo.productIds.length === 0 && promo.categoryIds.length === 0
+              ? true
+              : promo.productIds.includes(item.productId) ||
+                (product.categoryId != null && promo.categoryIds.includes(product.categoryId));
+
+          if (!matches) continue;
+          if (promo.minQty != null && item.quantity < promo.minQty) continue;
+
+          const lineTotal = item.price * item.quantity;
+          if (promo.minAmount != null && lineTotal < promo.minAmount) continue;
+
+          if (promo.type === 'percent_off') {
+            promotionDiscount += lineTotal * (promo.value / 100);
+          } else if (promo.type === 'fixed_off') {
+            promotionDiscount += promo.value * item.quantity;
+          } else if (promo.type === 'bogo') {
+            const freeQty = Math.floor(item.quantity / 2);
+            promotionDiscount += item.price * freeQty;
+          } else if (promo.type === 'price_override') {
+            promotionDiscount += Math.max(0, item.price - promo.value) * item.quantity;
+          }
+        }
+      }
+    }
+
+    // Cap promotion discount so total never goes below zero
+    const cappedPromotionDiscount = Math.min(promotionDiscount, subtotal + taxAmount);
+
     // ── hook: order:before-create ──────────────────────────────────────────────
     const beforeCtx = await hooks.run('order:before-create', {
       payload: {
@@ -129,7 +201,7 @@ ordersRouter.post('/', async (req, res, next) => {
         subtotal,
         taxAmount,
         discountAmount,
-        total: subtotal + taxAmount,
+        total: subtotal + taxAmount - cappedPromotionDiscount,
         customerId: data.customerId,
         sessionId: data.sessionId,
         notes: data.notes,
@@ -149,6 +221,7 @@ ordersRouter.post('/', async (req, res, next) => {
         subtotal: beforeCtx.payload.subtotal,
         taxAmount: beforeCtx.payload.taxAmount,
         discountAmount: beforeCtx.payload.discountAmount,
+        promotionDiscount: cappedPromotionDiscount,
         total: beforeCtx.payload.total,
         items: { create: beforeCtx.payload.items },
       },
@@ -184,9 +257,10 @@ ordersRouter.get('/:id', async (req, res, next) => {
 
 const completeOrderSchema = z.object({
   payments: z.array(z.object({
-    method: z.enum(['cash', 'card', 'store_credit', 'other']),
+    method: z.enum(['cash', 'card', 'store_credit', 'gift_card', 'other']),
     amount: z.number().positive(),
     reference: z.string().optional(),
+    giftCardId: z.string().optional(),
   })).min(1),
 });
 
@@ -201,8 +275,21 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
 
     const { payments } = completeOrderSchema.parse(req.body);
     const amountPaid = payments.reduce((s, p) => s + p.amount, 0);
-    if (amountPaid < order.total) {
+    if (amountPaid < order.total - 0.01) {
       throw new AppError(400, `Insufficient payment: ${amountPaid} < ${order.total}`);
+    }
+
+    // Validate and deduct gift card balances
+    for (const p of payments) {
+      if (p.method === 'gift_card') {
+        if (!p.giftCardId) throw new AppError(400, 'giftCardId required for gift_card payment');
+        const card = await prisma.giftCard.findFirst({
+          where: { id: p.giftCardId, tenantId: req.user!.tenantId, active: true },
+        });
+        if (!card) throw new AppError(400, 'Gift card not found or inactive');
+        if (card.expiresAt && card.expiresAt < new Date()) throw new AppError(400, 'Gift card is expired');
+        if (card.balance < p.amount - 0.01) throw new AppError(400, `Insufficient gift card balance: ${card.balance}`);
+      }
     }
 
     // ── hook: order:before-complete (inventory deduction runs here) ────────────
@@ -211,14 +298,46 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
       meta: {},
     });
 
-    const completed = await prisma.order.update({
-      where: { id: order.id },
-      data: {
-        status: 'completed',
-        completedAt: new Date(),
-        payments: { create: payments },
-      },
-      include: orderInclude,
+    const completed = await prisma.$transaction(async (tx) => {
+      // Deduct gift card balances atomically (prevents overdraft under concurrent load)
+      for (const p of payments) {
+        if (p.method === 'gift_card' && p.giftCardId) {
+          const result = await tx.giftCard.updateMany({
+            where: { id: p.giftCardId, tenantId: req.user!.tenantId, active: true, balance: { gte: p.amount } },
+            data: { balance: { decrement: p.amount } },
+          });
+          if (result.count === 0) {
+            throw new AppError(400, 'Gift card has insufficient balance or is no longer active');
+          }
+          const updated = await tx.giftCard.findUnique({ where: { id: p.giftCardId } });
+          await tx.giftCardTransaction.create({
+            data: {
+              giftCardId: p.giftCardId,
+              orderId: order.id,
+              type: 'redeem',
+              amount: p.amount,
+              balanceAfter: updated!.balance,
+            },
+          });
+        }
+      }
+
+      return tx.order.update({
+        where: { id: order.id },
+        data: {
+          status: 'completed',
+          completedAt: new Date(),
+          payments: {
+            create: payments.map((p) => ({
+              method: p.method,
+              amount: p.amount,
+              reference: p.reference,
+              giftCardId: p.giftCardId,
+            })),
+          },
+        },
+        include: orderInclude,
+      });
     });
 
     // ── hook: order:after-complete ─────────────────────────────────────────────
