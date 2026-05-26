@@ -4,11 +4,13 @@ dist/
 *.env.local
 .DS_Store
 *.log
-prisma/migrations/
 
 # IDE
 .vscode/settings.json
 .idea/
+
+# Local dev state
+.db-initialized
 
 # Build outputs
 apps/*/dist/
