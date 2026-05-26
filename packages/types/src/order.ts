@@ -1,5 +1,5 @@
 export type OrderStatus = 'open' | 'completed' | 'voided' | 'refunded';
-export type PaymentMethod = 'cash' | 'card' | 'store_credit' | 'other';
+export type PaymentMethod = 'cash' | 'card' | 'store_credit' | 'gift_card' | 'other';
 
 export interface Customer {
   id: string;
@@ -8,6 +8,9 @@ export interface Customer {
   email?: string;
   phone?: string;
   notes?: string;
+  taxExempt: boolean;
+  taxExemptCertificate?: string;
+  priceLevelId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -32,11 +35,13 @@ export interface Payment {
   method: PaymentMethod;
   amount: number;
   reference?: string;
+  giftCardId?: string;
   createdAt: string;
 }
 
 export interface Order {
   id: string;
+  tenantId: string;
   locationId: string;
   sessionId?: string;
   userId: string;
@@ -46,6 +51,7 @@ export interface Order {
   subtotal: number;
   taxAmount: number;
   discountAmount: number;
+  promotionDiscount: number;
   total: number;
   notes?: string;
   items: OrderItem[];

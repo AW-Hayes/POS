@@ -3,7 +3,8 @@ import { useAuthStore } from '@/stores/auth';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard, ShoppingCart, Package, Warehouse, ClipboardList,
-  Users, Settings, LogOut, ShoppingBag,
+  Users, Settings, LogOut, ShoppingBag, BarChart3, Building2,
+  Truck, Tag, Layers, CreditCard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -14,6 +15,12 @@ const navItems = [
   { to: '/inventory', label: 'Inventory', icon: Warehouse },
   { to: '/orders', label: 'Orders', icon: ClipboardList },
   { to: '/customers', label: 'Customers', icon: Users },
+  { to: '/reports', label: 'Reports', icon: BarChart3 },
+  { to: '/promotions', label: 'Promotions', icon: Tag },
+  { to: '/price-levels', label: 'Price Levels', icon: Layers },
+  { to: '/gift-cards', label: 'Gift Cards', icon: CreditCard },
+  { to: '/vendors', label: 'Vendors', icon: Building2 },
+  { to: '/purchase-orders', label: 'Purchase Orders', icon: Truck },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 

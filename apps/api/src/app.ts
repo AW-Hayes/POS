@@ -14,6 +14,14 @@ import { productsRouter } from './routes/products';
 import { inventoryRouter } from './routes/inventory';
 import { ordersRouter } from './routes/orders';
 import { customersRouter } from './routes/customers';
+import { returnsRouter } from './routes/returns';
+import { reportsRouter } from './routes/reports';
+import { sessionsRouter } from './routes/sessions';
+import { promotionsRouter } from './routes/promotions';
+import { vendorsRouter } from './routes/vendors';
+import { purchaseOrdersRouter } from './routes/purchase-orders';
+import { priceLevelsRouter } from './routes/price-levels';
+import { giftCardsRouter } from './routes/gift-cards';
 import { errorHandler } from './middleware/errorHandler';
 import { registerBuiltinHooks } from './hooks';
 
@@ -43,5 +51,13 @@ app.use('/api/products', productsRouter);
 app.use('/api/inventory', inventoryRouter);
 app.use('/api/orders', ordersRouter);
 app.use('/api/customers', customersRouter);
+app.use('/api/returns', returnsRouter);
+app.use('/api/reports', reportsRouter);
+app.use('/api/sessions', sessionsRouter);
+app.use('/api/promotions', promotionsRouter);
+app.use('/api/vendors', vendorsRouter);
+app.use('/api/purchase-orders', purchaseOrdersRouter);
+app.use('/api/price-levels', priceLevelsRouter);
+app.use('/api/gift-cards', giftCardsRouter);
 
 app.use(errorHandler);
