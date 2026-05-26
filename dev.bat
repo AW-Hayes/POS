@@ -31,6 +31,11 @@ if not exist "node_modules" (
     if errorlevel 1 ( echo [ERROR] npm install failed & pause & exit /b 1 )
 )
 
+:: ── Generate Prisma client ────────────────────────────────────────────────────
+echo [SETUP] Generating Prisma client ...
+call npm run -w apps/api prisma generate
+if errorlevel 1 ( echo [ERROR] Prisma generate failed & pause & exit /b 1 )
+
 :: ── Ask: first-time DB setup? ─────────────────────────────────────────────────
 if not exist ".db-initialized" (
     echo.
