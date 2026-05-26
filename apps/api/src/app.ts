@@ -15,6 +15,9 @@ import { inventoryRouter } from './routes/inventory';
 import { ordersRouter } from './routes/orders';
 import { customersRouter } from './routes/customers';
 import { errorHandler } from './middleware/errorHandler';
+import { registerBuiltinHooks } from './hooks';
+
+registerBuiltinHooks();
 
 export const app = express();
 

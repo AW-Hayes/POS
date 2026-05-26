@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticate, requireRole } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
-import { adjustInventory } from './inventory';
+import { hooks } from '../hooks';
 import { qs } from '../lib/qs';
 
 export const ordersRouter = Router();
@@ -48,6 +48,8 @@ ordersRouter.get('/', async (req, res, next) => {
     next(err);
   }
 });
+
+// ─── Create order ─────────────────────────────────────────────────────────────
 
 const createOrderSchema = z.object({
   locationId: z.string(),
@@ -99,7 +101,6 @@ ordersRouter.post('/', async (req, res, next) => {
       const lineDiscount = item.discount * item.quantity;
       const lineSubtotal = unitPrice * item.quantity - lineDiscount;
       const lineTax = lineSubtotal * taxRate;
-      const lineTotal = lineSubtotal + lineTax;
 
       subtotal += lineSubtotal;
       taxAmount += lineTax;
@@ -114,26 +115,50 @@ ordersRouter.post('/', async (req, res, next) => {
         quantity: item.quantity,
         discount: item.discount,
         taxRate,
-        total: lineTotal,
+        total: lineSubtotal + lineTax,
       };
+    });
+
+    // ── hook: order:before-create ──────────────────────────────────────────────
+    const beforeCtx = await hooks.run('order:before-create', {
+      payload: {
+        tenantId: req.user!.tenantId,
+        locationId: data.locationId,
+        userId: req.user!.userId,
+        items: orderItems,
+        subtotal,
+        taxAmount,
+        discountAmount,
+        total: subtotal + taxAmount,
+        customerId: data.customerId,
+        sessionId: data.sessionId,
+        notes: data.notes,
+      },
+      meta: {},
     });
 
     const order = await prisma.order.create({
       data: {
         tenantId: req.user!.tenantId,
-        locationId: data.locationId,
-        sessionId: data.sessionId,
+        locationId: beforeCtx.payload.locationId,
+        sessionId: beforeCtx.payload.sessionId,
         userId: req.user!.userId,
-        customerId: data.customerId,
-        notes: data.notes,
+        customerId: beforeCtx.payload.customerId,
+        notes: beforeCtx.payload.notes,
         status: 'open',
-        subtotal,
-        taxAmount,
-        discountAmount,
-        total: subtotal + taxAmount,
-        items: { create: orderItems },
+        subtotal: beforeCtx.payload.subtotal,
+        taxAmount: beforeCtx.payload.taxAmount,
+        discountAmount: beforeCtx.payload.discountAmount,
+        total: beforeCtx.payload.total,
+        items: { create: beforeCtx.payload.items },
       },
       include: orderInclude,
+    });
+
+    // ── hook: order:after-create ───────────────────────────────────────────────
+    await hooks.run('order:after-create', {
+      payload: { order: order as Parameters<typeof hooks.run<'order:after-create'>>[1]['payload']['order'] },
+      meta: {},
     });
 
     res.status(201).json({ success: true, data: order });
@@ -154,6 +179,8 @@ ordersRouter.get('/:id', async (req, res, next) => {
     next(err);
   }
 });
+
+// ─── Complete order ────────────────────────────────────────────────────────────
 
 const completeOrderSchema = z.object({
   payments: z.array(z.object({
@@ -178,43 +205,26 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
       throw new AppError(400, `Insufficient payment: ${amountPaid} < ${order.total}`);
     }
 
-    const completed = await prisma.$transaction(async (tx) => {
-      const updated = await tx.order.update({
-        where: { id: order.id },
-        data: {
-          status: 'completed',
-          completedAt: new Date(),
-          payments: { create: payments },
-        },
-        include: orderInclude,
-      });
+    // ── hook: order:before-complete (inventory deduction runs here) ────────────
+    await hooks.run('order:before-complete', {
+      payload: { order, payments, userId: req.user!.userId },
+      meta: {},
+    });
 
-      const trackedProducts = await tx.product.findMany({
-        where: {
-          id: { in: order.items.map((i) => i.productId).filter((id): id is string => id != null) },
-          trackInventory: true,
-        },
-        select: { id: true },
-      });
-      const trackedIds = new Set(trackedProducts.map((p) => p.id));
+    const completed = await prisma.order.update({
+      where: { id: order.id },
+      data: {
+        status: 'completed',
+        completedAt: new Date(),
+        payments: { create: payments },
+      },
+      include: orderInclude,
+    });
 
-      await Promise.all(
-        order.items
-          .filter((item) => item.productId && trackedIds.has(item.productId))
-          .map((item) =>
-            adjustInventory({
-              locationId: order.locationId,
-              productId: item.productId!,
-              variantId: item.variantId ?? undefined,
-              type: 'sale',
-              delta: -item.quantity,
-              reference: order.id,
-              userId: req.user!.userId,
-            }),
-          ),
-      );
-
-      return updated;
+    // ── hook: order:after-complete ─────────────────────────────────────────────
+    await hooks.run('order:after-complete', {
+      payload: { order: completed as Parameters<typeof hooks.run<'order:after-complete'>>[1]['payload']['order'] },
+      meta: {},
     });
 
     res.json({ success: true, data: completed });
@@ -222,6 +232,8 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
     next(err);
   }
 });
+
+// ─── Void order ────────────────────────────────────────────────────────────────
 
 ordersRouter.post('/:id/void', requireRole('admin', 'manager'), async (req, res, next) => {
   try {
@@ -236,42 +248,22 @@ ordersRouter.post('/:id/void', requireRole('admin', 'manager'), async (req, res,
 
     const { note } = z.object({ note: z.string().optional() }).parse(req.body);
 
-    const voided = await prisma.$transaction(async (tx) => {
-      const updated = await tx.order.update({
-        where: { id: order.id },
-        data: { status: 'voided' },
-        include: orderInclude,
-      });
+    // ── hook: order:before-void (inventory restore runs here) ─────────────────
+    await hooks.run('order:before-void', {
+      payload: { order, note, userId: req.user!.userId },
+      meta: {},
+    });
 
-      if (order.status === 'completed') {
-        const trackedProducts = await tx.product.findMany({
-          where: {
-            id: { in: order.items.map((i) => i.productId).filter((id): id is string => id != null) },
-            trackInventory: true,
-          },
-          select: { id: true },
-        });
-        const trackedIds = new Set(trackedProducts.map((p) => p.id));
+    const voided = await prisma.order.update({
+      where: { id: order.id },
+      data: { status: 'voided' },
+      include: orderInclude,
+    });
 
-        await Promise.all(
-          order.items
-            .filter((item) => item.productId && trackedIds.has(item.productId))
-            .map((item) =>
-              adjustInventory({
-                locationId: order.locationId,
-                productId: item.productId!,
-                variantId: item.variantId ?? undefined,
-                type: 'return',
-                delta: item.quantity,
-                reference: order.id,
-                note,
-                userId: req.user!.userId,
-              }),
-            ),
-        );
-      }
-
-      return updated;
+    // ── hook: order:after-void ─────────────────────────────────────────────────
+    await hooks.run('order:after-void', {
+      payload: { order: voided as Parameters<typeof hooks.run<'order:after-void'>>[1]['payload']['order'] },
+      meta: {},
     });
 
     res.json({ success: true, data: voided });
