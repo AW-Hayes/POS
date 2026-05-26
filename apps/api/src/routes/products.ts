@@ -20,6 +20,8 @@ const productSchema = z.object({
   trackInventory: z.boolean().default(true),
   imageUrl: z.string().url().optional(),
   sortOrder: z.number().int().optional(),
+  requiresAgeVerification: z.boolean().default(false),
+  minAge: z.number().int().min(1).optional(),
 });
 
 const productInclude = {
@@ -41,11 +43,16 @@ productsRouter.get('/', async (req, res, next) => {
     const pageSize = Math.min(Number(qs(req.query.pageSize) ?? '50'), 200);
     const skip = (page - 1) * pageSize;
 
+    const sku = qs(req.query.sku);
+    const barcode = qs(req.query.barcode);
+
     const where = {
       tenantId: req.user!.tenantId,
       active: activeParam === 'true',
       ...(categoryId ? { categoryId } : {}),
-      ...(q ? { name: { contains: q, mode: 'insensitive' as const } } : {}),
+      ...(sku ? { sku } : {}),
+      ...(barcode ? { barcode } : {}),
+      ...(q && !sku && !barcode ? { name: { contains: q, mode: 'insensitive' as const } } : {}),
     };
 
     const [products, total] = await Promise.all([

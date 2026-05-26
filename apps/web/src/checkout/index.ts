@@ -14,11 +14,14 @@ export type {
 import { pipelineRegistry, paymentMethodRegistry } from './registry';
 import { CartReviewStep } from './steps/CartReviewStep';
 import { CustomerStep } from './steps/CustomerStep';
+import { AgeVerificationStep } from './steps/AgeVerificationStep';
 import { PaymentStep } from './steps/PaymentStep';
 import { ReceiptStep } from './steps/ReceiptStep';
 import { CashPayment } from './payments/CashPayment';
 import { CardPayment } from './payments/CardPayment';
-import { Banknote, CreditCard } from 'lucide-react';
+import { LoyaltyPayment } from './payments/LoyaltyPayment';
+import { HouseAccountPayment } from './payments/HouseAccountPayment';
+import { Banknote, CreditCard, Star, Building2 } from 'lucide-react';
 
 /**
  * Register the default checkout pipeline and built-in payment methods.
@@ -47,10 +50,18 @@ export function initCheckout(): void {
   // ── Default pipeline steps ────────────────────────────────────────────────
   pipelineRegistry.insertStep({ id: 'cart-review', label: 'Review',   component: CartReviewStep });
   pipelineRegistry.insertStep({ id: 'customer',    label: 'Customer', component: CustomerStep });
+  pipelineRegistry.insertStep({
+    id: 'age-verify',
+    label: 'Age Verify',
+    component: AgeVerificationStep,
+    condition: (state) => state.cart.some((i) => i.requiresAgeVerification),
+  });
   pipelineRegistry.insertStep({ id: 'payment',     label: 'Payment',  component: PaymentStep });
   pipelineRegistry.insertStep({ id: 'receipt',     label: 'Receipt',  component: ReceiptStep });
 
   // ── Default payment methods ───────────────────────────────────────────────
-  paymentMethodRegistry.register({ id: 'cash', label: 'Cash', icon: Banknote, component: CashPayment });
-  paymentMethodRegistry.register({ id: 'card', label: 'Card', icon: CreditCard, component: CardPayment });
+  paymentMethodRegistry.register({ id: 'cash',          label: 'Cash',          icon: Banknote,   component: CashPayment });
+  paymentMethodRegistry.register({ id: 'card',          label: 'Card',          icon: CreditCard, component: CardPayment });
+  paymentMethodRegistry.register({ id: 'loyalty',       label: 'Loyalty Points', icon: Star,       component: LoyaltyPayment });
+  paymentMethodRegistry.register({ id: 'house_account', label: 'House Account', icon: Building2,  component: HouseAccountPayment });
 }

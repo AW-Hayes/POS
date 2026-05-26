@@ -254,3 +254,60 @@ export async function adjustInventory(
 
   return txClient ? run(txClient) : prisma.$transaction(run);
 }
+
+// ─── Reorder points ───────────────────────────────────────────────────────────
+
+inventoryRouter.get('/below-reorder', async (req, res, next) => {
+  try {
+    const locationId = qs(req.query.locationId);
+
+    const all = await prisma.inventoryItem.findMany({
+      where: {
+        location: { tenantId: req.user!.tenantId },
+        ...(locationId ? { locationId } : {}),
+        reorderPoint: { not: null },
+      },
+      include: {
+        product: {
+          select: { id: true, name: true, sku: true, preferredVendorId: true, preferredVendor: { select: { id: true, name: true } } },
+        },
+        variant: { select: { id: true, sku: true } },
+      },
+    });
+
+    const belowReorder = all.filter((i) => i.reorderPoint != null && i.quantity <= i.reorderPoint);
+    res.json({ success: true, data: belowReorder });
+  } catch (err) {
+    next(err);
+  }
+});
+
+inventoryRouter.put('/:locationId/:productId/reorder', requireRole('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { variantId, reorderPoint, reorderQty } = z
+      .object({
+        variantId: z.string().optional(),
+        reorderPoint: z.number().min(0).nullable(),
+        reorderQty: z.number().min(0).nullable(),
+      })
+      .parse(req.body);
+
+    const item = await prisma.inventoryItem.findFirst({
+      where: {
+        locationId: req.params.locationId,
+        productId: req.params.productId,
+        variantId: variantId ?? null,
+        location: { tenantId: req.user!.tenantId },
+      },
+    });
+    if (!item) throw new AppError(404, 'Inventory item not found');
+
+    const updated = await prisma.inventoryItem.update({
+      where: { id: item.id },
+      data: { reorderPoint, reorderQty },
+    });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    next(err);
+  }
+});

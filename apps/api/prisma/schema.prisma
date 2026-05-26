@@ -73,9 +73,10 @@ model RegisterSession {
   closingNotes String?
   notes        String?
 
-  register Register @relation(fields: [registerId], references: [id])
-  user     User     @relation(fields: [userId], references: [id])
-  orders   Order[]
+  register  Register   @relation(fields: [registerId], references: [id])
+  user      User       @relation(fields: [userId], references: [id])
+  orders    Order[]
+  cashDrops CashDrop[]
 }
 
 // ─── Users & Auth ─────────────────────────────────────────────────────────────
@@ -95,9 +96,14 @@ model User {
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   sessions             RegisterSession[]
   orders               Order[]
+  salespersonOrders    Order[]               @relation("Salesperson")
   inventoryAdjustments InventoryAdjustment[]
   purchaseOrders       PurchaseOrder[]
   orderReturns         OrderReturn[]
+  layawayDeposits      LayawayDeposit[]
+  cashDrops            CashDrop[]
+  loyaltyTransactions  LoyaltyTransaction[]
+  timeEntries          TimeEntry[]
 
   @@unique([tenantId, email])
 }
@@ -145,13 +151,16 @@ model Product {
   barcode        String?
   price          Float
   cost           Float?
-  taxable        Boolean  @default(true)
-  trackInventory Boolean  @default(true)
-  active         Boolean  @default(true)
-  imageUrl       String?
-  sortOrder      Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  taxable                 Boolean  @default(true)
+  trackInventory          Boolean  @default(true)
+  active                  Boolean  @default(true)
+  imageUrl                String?
+  sortOrder               Int      @default(0)
+  requiresAgeVerification Boolean  @default(false)
+  minAge                  Int?
+  preferredVendorId       String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   tenant             Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   category           Category?            @relation(fields: [categoryId], references: [id])
@@ -160,6 +169,9 @@ model Product {
   inventory          InventoryItem[]
   prices             ProductPrice[]
   purchaseOrderItems PurchaseOrderItem[]
+  preferredVendor    Vendor?              @relation("PreferredVendor", fields: [preferredVendorId], references: [id])
+  serialNumbers      SerialNumber[]
+  priceBreaks        PriceBreak[]
 
   @@unique([tenantId, sku])
   @@unique([tenantId, barcode])
@@ -195,6 +207,8 @@ model ProductVariant {
   orderItems         OrderItem[]
   prices             ProductPrice[]
   purchaseOrderItems PurchaseOrderItem[]
+  priceBreaks        PriceBreak[]
+  serialNumbers      SerialNumber[]
 }
 
 model VariantAttributeValue {
@@ -216,9 +230,11 @@ model InventoryItem {
   locationId String
   productId  String
   variantId  String?
-  quantity   Float    @default(0)
-  lowStockAt Float?
-  updatedAt  DateTime @updatedAt
+  quantity     Float    @default(0)
+  lowStockAt   Float?
+  reorderPoint Float?
+  reorderQty   Float?
+  updatedAt    DateTime @updatedAt
 
   location    Location              @relation(fields: [locationId], references: [id], onDelete: Cascade)
   product     Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -255,12 +271,17 @@ model Customer {
   taxExempt            Boolean  @default(false)
   taxExemptCertificate String?
   priceLevelId         String?
+  loyaltyPoints        Float    @default(0)
+  arBalance            Float    @default(0)
+  creditLimit          Float?
+  emailReceiptsEnabled Boolean  @default(false)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  orders     Order[]
-  priceLevel PriceLevel? @relation(fields: [priceLevelId], references: [id])
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders              Order[]
+  priceLevel          PriceLevel?          @relation(fields: [priceLevelId], references: [id])
+  loyaltyTransactions LoyaltyTransaction[]
 
   @@unique([tenantId, email])
 }
@@ -274,24 +295,29 @@ model Order {
   sessionId         String?
   userId            String
   customerId        String?
-  status            String    @default("open")
+  status            String    @default("open") // open|completed|voided|refunded|held|estimate|layaway
   subtotal          Float
   taxAmount         Float     @default(0)
   discountAmount    Float     @default(0)
   promotionDiscount Float     @default(0)
   total             Float
   notes             String?
+  heldName          String?
+  estimateExpiresAt DateTime?
+  salespersonId     String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   completedAt       DateTime?
 
-  location  Location         @relation(fields: [locationId], references: [id])
-  session   RegisterSession? @relation(fields: [sessionId], references: [id])
-  user      User             @relation(fields: [userId], references: [id])
-  customer  Customer?        @relation(fields: [customerId], references: [id])
-  items     OrderItem[]
-  payments  Payment[]
-  returns   OrderReturn[]
+  location        Location         @relation(fields: [locationId], references: [id])
+  session         RegisterSession? @relation(fields: [sessionId], references: [id])
+  user            User             @relation(fields: [userId], references: [id])
+  customer        Customer?        @relation(fields: [customerId], references: [id])
+  salesperson     User?            @relation("Salesperson", fields: [salespersonId], references: [id])
+  items           OrderItem[]
+  payments        Payment[]
+  returns         OrderReturn[]
+  layawayDeposits LayawayDeposit[]
 }
 
 model OrderItem {
@@ -437,8 +463,9 @@ model Vendor {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  purchaseOrders PurchaseOrder[]
+  tenant            Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  purchaseOrders    PurchaseOrder[]
+  preferredProducts Product[]   @relation("PreferredVendor")
 
   @@index([tenantId])
 }
@@ -513,4 +540,109 @@ model GiftCardTransaction {
   giftCard GiftCard @relation(fields: [giftCardId], references: [id])
 
   @@index([giftCardId])
+}
+
+// ─── Layaway Deposits ─────────────────────────────────────────────────────────
+
+model LayawayDeposit {
+  id        String   @id @default(cuid())
+  orderId   String
+  userId    String?
+  amount    Float
+  method    String   // "cash" | "card" | "store_credit" | "gift_card" | "other"
+  reference String?
+  note      String?
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user  User? @relation(fields: [userId], references: [id])
+
+  @@index([orderId])
+}
+
+// ─── Cash Drops ───────────────────────────────────────────────────────────────
+
+model CashDrop {
+  id        String   @id @default(cuid())
+  sessionId String
+  userId    String
+  amount    Float
+  note      String?
+  createdAt DateTime @default(now())
+
+  session RegisterSession @relation(fields: [sessionId], references: [id])
+  user    User            @relation(fields: [userId], references: [id])
+
+  @@index([sessionId])
+}
+
+// ─── Loyalty ──────────────────────────────────────────────────────────────────
+
+model LoyaltyTransaction {
+  id         String   @id @default(cuid())
+  customerId String
+  userId     String?
+  orderId    String?
+  type       String   // "earn" | "redeem" | "adjust" | "expire"
+  points     Float
+  note       String?
+  createdAt  DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  user     User?    @relation(fields: [userId], references: [id])
+
+  @@index([customerId])
+}
+
+// ─── Price Breaks ─────────────────────────────────────────────────────────────
+
+model PriceBreak {
+  id        String  @id @default(cuid())
+  productId String
+  variantId String?
+  minQty    Float
+  price     Float
+
+  product Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@index([productId])
+}
+
+// ─── Serial Numbers ───────────────────────────────────────────────────────────
+
+model SerialNumber {
+  id              String    @id @default(cuid())
+  productId       String
+  variantId       String?
+  serial          String
+  status          String    @default("available") // "available" | "sold" | "returned"
+  orderItemId     String?
+  purchaseOrderId String?
+  createdAt       DateTime  @default(now())
+  soldAt          DateTime?
+
+  product Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@unique([productId, serial])
+  @@index([productId])
+}
+
+// ─── Time Clock ───────────────────────────────────────────────────────────────
+
+model TimeEntry {
+  id         String    @id @default(cuid())
+  userId     String
+  tenantId   String
+  type       String    @default("work") // "work" | "break"
+  clockIn    DateTime
+  clockOut   DateTime?
+  note       String?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tenantId])
 }

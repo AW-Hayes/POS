@@ -10,6 +10,7 @@ export interface CartItem {
   price: number;
   quantity: number;
   discount: number;
+  requiresAgeVerification?: boolean;
 }
 
 // ─── Checkout state ────────────────────────────────────────────────────────────
