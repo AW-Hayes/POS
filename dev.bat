@@ -33,7 +33,9 @@ if not exist "node_modules" (
 
 :: ── Generate Prisma client ────────────────────────────────────────────────────
 echo [SETUP] Generating Prisma client ...
-call npx --prefix apps\api prisma generate
+pushd apps\api
+call npx prisma generate
+popd
 if errorlevel 1 ( echo [ERROR] Prisma generate failed & pause & exit /b 1 )
 
 :: ── Ask: first-time DB setup? ─────────────────────────────────────────────────
