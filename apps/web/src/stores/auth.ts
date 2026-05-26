@@ -21,18 +21,15 @@ export const useAuthStore = create<AuthState>()(
 
       login: async (email, password) => {
         const { data } = await api.post('/auth/login', { email, password });
-        localStorage.setItem('pos_token', data.data.token);
         set({ token: data.data.token, user: data.data.user, isAuthenticated: true });
       },
 
       pinLogin: async (registerId, pin) => {
         const { data } = await api.post('/auth/pin-login', { registerId, pin });
-        localStorage.setItem('pos_token', data.data.token);
         set({ token: data.data.token, user: data.data.user, isAuthenticated: true });
       },
 
       logout: () => {
-        localStorage.removeItem('pos_token');
         set({ token: null, user: null, isAuthenticated: false });
       },
     }),

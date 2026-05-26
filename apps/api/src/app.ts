@@ -15,11 +15,18 @@ import { inventoryRouter } from './routes/inventory';
 import { ordersRouter } from './routes/orders';
 import { customersRouter } from './routes/customers';
 import { errorHandler } from './middleware/errorHandler';
+import { registerBuiltinHooks } from './hooks';
+
+registerBuiltinHooks();
 
 export const app = express();
 
 app.use(helmet());
-app.use(cors({ origin: process.env.CORS_ORIGIN ?? '*' }));
+const allowedOrigin = process.env.CORS_ORIGIN;
+if (!allowedOrigin && process.env.NODE_ENV === 'production') {
+  throw new Error('CORS_ORIGIN must be set in production');
+}
+app.use(cors({ origin: allowedOrigin ?? '*' }));
 app.use(express.json());
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 

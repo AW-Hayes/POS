@@ -38,7 +38,7 @@ productsRouter.get('/', async (req, res, next) => {
     const categoryId = qs(req.query.categoryId);
     const activeParam = qs(req.query.active) ?? 'true';
     const page = Number(qs(req.query.page) ?? '1');
-    const pageSize = Number(qs(req.query.pageSize) ?? '50');
+    const pageSize = Math.min(Number(qs(req.query.pageSize) ?? '50'), 200);
     const skip = (page - 1) * pageSize;
 
     const where = {
@@ -220,6 +220,10 @@ productsRouter.post('/:id/variants/generate', requireRole('admin', 'manager'), a
         attributeValues[id].map((val) => ({ productAttributeId: productAttributes[i].id, value: val })),
       ),
     );
+
+    if (combinations.length > 500) {
+      throw new AppError(400, `Variant generation would produce ${combinations.length} variants (max 500)`);
+    }
 
     const created = await Promise.all(
       combinations.map((combo) =>
