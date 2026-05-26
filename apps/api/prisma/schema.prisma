@@ -1,0 +1,304 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Tenants & Locations ─────────────────────────────────────────────────────
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locations          Location[]
+  users              User[]
+  products           Product[]
+  categories         Category[]
+  customers          Customer[]
+  attributeDefinitions AttributeDefinition[]
+}
+
+model Location {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  address   String?
+  phone     String?
+  settings  Json     @default("{}")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  registers Register[]
+  inventory InventoryItem[]
+  orders    Order[]
+}
+
+model Register {
+  id         String   @id @default(cuid())
+  locationId String
+  name       String
+  mode       String   @default("desktop") // "touch" | "desktop"
+  settings   Json     @default("{}")
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  location Location          @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  sessions RegisterSession[]
+}
+
+model RegisterSession {
+  id          String    @id @default(cuid())
+  registerId  String
+  userId      String
+  openedAt    DateTime  @default(now())
+  closedAt    DateTime?
+  openingCash Float     @default(0)
+  closingCash Float?
+  notes       String?
+
+  register Register @relation(fields: [registerId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+  orders   Order[]
+}
+
+// ─── Users & Auth ─────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String
+  email        String
+  name         String
+  passwordHash String?
+  pin          String? // bcrypt-hashed 4–6 digit PIN for terminal login
+  role         String   @default("cashier") // "admin" | "manager" | "cashier"
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant               Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sessions             RegisterSession[]
+  orders               Order[]
+  inventoryAdjustments InventoryAdjustment[]
+
+  @@unique([tenantId, email])
+}
+
+// ─── Products ─────────────────────────────────────────────────────────────────
+
+model Category {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  parentId  String?
+  sortOrder Int      @default(0)
+  color     String?
+  icon      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  products Product[]
+}
+
+model AttributeDefinition {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String // e.g. "Size", "Color"
+  values    String[] // e.g. ["S", "M", "L", "XL"]
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productAttributes ProductAttribute[]
+
+  @@unique([tenantId, name])
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  tenantId       String
+  categoryId     String?
+  name           String
+  description    String?
+  sku            String?
+  barcode        String?
+  price          Float
+  cost           Float?
+  taxable        Boolean  @default(true)
+  trackInventory Boolean  @default(true)
+  active         Boolean  @default(true)
+  imageUrl       String?
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category   Category? @relation(fields: [categoryId], references: [id])
+  attributes ProductAttribute[]
+  variants   ProductVariant[]
+  inventory  InventoryItem[]
+
+  @@unique([tenantId, sku])
+  @@unique([tenantId, barcode])
+}
+
+model ProductAttribute {
+  id          String @id @default(cuid())
+  productId   String
+  attributeId String
+
+  product         Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attribute       AttributeDefinition @relation(fields: [attributeId], references: [id])
+  variantValues   VariantAttributeValue[]
+
+  @@unique([productId, attributeId])
+}
+
+model ProductVariant {
+  id        String   @id @default(cuid())
+  productId String
+  sku       String?
+  barcode   String?
+  price     Float? // null = inherit from product
+  cost      Float?
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product         Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attributeValues VariantAttributeValue[]
+  inventory       InventoryItem[]
+  orderItems      OrderItem[]
+}
+
+model VariantAttributeValue {
+  id                 String @id @default(cuid())
+  variantId          String
+  productAttributeId String
+  value              String
+
+  variant          ProductVariant   @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  productAttribute ProductAttribute @relation(fields: [productAttributeId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, productAttributeId])
+}
+
+// ─── Inventory ────────────────────────────────────────────────────────────────
+
+model InventoryItem {
+  id         String   @id @default(cuid())
+  locationId String
+  productId  String
+  variantId  String?
+  quantity   Float    @default(0)
+  lowStockAt Float? // alert threshold
+  updatedAt  DateTime @updatedAt
+
+  location    Location              @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  product     Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant     ProductVariant?       @relation(fields: [variantId], references: [id])
+  adjustments InventoryAdjustment[]
+
+  @@unique([locationId, productId, variantId])
+}
+
+model InventoryAdjustment {
+  id              String   @id @default(cuid())
+  inventoryItemId String
+  userId          String?
+  type            String // "sale" | "return" | "purchase" | "adjustment" | "transfer_in" | "transfer_out" | "damage" | "shrinkage"
+  delta           Float // positive = stock in, negative = stock out
+  quantityAfter   Float
+  note            String?
+  reference       String? // order ID, transfer ID, etc.
+  createdAt       DateTime @default(now())
+
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
+  user          User?         @relation(fields: [userId], references: [id])
+}
+
+// ─── Customers ────────────────────────────────────────────────────────────────
+
+model Customer {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  email     String?
+  phone     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@unique([tenantId, email])
+}
+
+// ─── Orders ───────────────────────────────────────────────────────────────────
+
+model Order {
+  id             String    @id @default(cuid())
+  tenantId       String // denormalized for easy filtering
+  locationId     String
+  sessionId      String?
+  userId         String
+  customerId     String?
+  status         String    @default("open") // "open" | "completed" | "voided" | "refunded"
+  subtotal       Float
+  taxAmount      Float     @default(0)
+  discountAmount Float     @default(0)
+  total          Float
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  completedAt    DateTime?
+
+  location  Location         @relation(fields: [locationId], references: [id])
+  session   RegisterSession? @relation(fields: [sessionId], references: [id])
+  user      User             @relation(fields: [userId], references: [id])
+  customer  Customer?        @relation(fields: [customerId], references: [id])
+  items     OrderItem[]
+  payments  Payment[]
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  productId String?
+  variantId String?
+  name      String // snapshot of name at time of sale
+  sku       String?
+  price     Float
+  quantity  Float
+  discount  Float   @default(0)
+  taxRate   Float   @default(0)
+  total     Float
+
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id])
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  orderId   String
+  method    String // "cash" | "card" | "store_credit" | "other"
+  amount    Float
+  reference String?
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}

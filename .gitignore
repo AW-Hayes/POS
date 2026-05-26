@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+*.env.local
+.DS_Store
+*.log
+prisma/migrations/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Build outputs
+apps/*/dist/
+packages/*/dist/
