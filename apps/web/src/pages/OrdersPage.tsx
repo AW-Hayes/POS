@@ -11,6 +11,9 @@ const STATUS_VARIANTS: Record<OrderStatus, 'success' | 'secondary' | 'destructiv
   open: 'warning',
   voided: 'destructive',
   refunded: 'secondary',
+  held: 'secondary',
+  estimate: 'secondary',
+  layaway: 'warning',
 };
 
 const STATUSES: Array<{ value: string; label: string }> = [

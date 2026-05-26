@@ -14,6 +14,7 @@ export type {
 import { pipelineRegistry, paymentMethodRegistry } from './registry';
 import { CartReviewStep } from './steps/CartReviewStep';
 import { CustomerStep } from './steps/CustomerStep';
+import { AgeVerificationStep } from './steps/AgeVerificationStep';
 import { PaymentStep } from './steps/PaymentStep';
 import { ReceiptStep } from './steps/ReceiptStep';
 import { CashPayment } from './payments/CashPayment';
@@ -47,6 +48,12 @@ export function initCheckout(): void {
   // ── Default pipeline steps ────────────────────────────────────────────────
   pipelineRegistry.insertStep({ id: 'cart-review', label: 'Review',   component: CartReviewStep });
   pipelineRegistry.insertStep({ id: 'customer',    label: 'Customer', component: CustomerStep });
+  pipelineRegistry.insertStep({
+    id: 'age-verify',
+    label: 'Age Verify',
+    component: AgeVerificationStep,
+    condition: (state) => state.cart.some((i) => i.requiresAgeVerification),
+  });
   pipelineRegistry.insertStep({ id: 'payment',     label: 'Payment',  component: PaymentStep });
   pipelineRegistry.insertStep({ id: 'receipt',     label: 'Receipt',  component: ReceiptStep });
 

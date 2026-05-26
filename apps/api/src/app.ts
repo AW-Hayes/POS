@@ -22,6 +22,10 @@ import { vendorsRouter } from './routes/vendors';
 import { purchaseOrdersRouter } from './routes/purchase-orders';
 import { priceLevelsRouter } from './routes/price-levels';
 import { giftCardsRouter } from './routes/gift-cards';
+import { heldOrdersRouter } from './routes/held-orders';
+import { estimatesRouter } from './routes/estimates';
+import { layawayRouter } from './routes/layaway';
+import { cashDropsRouter } from './routes/cash-drops';
 import { errorHandler } from './middleware/errorHandler';
 import { registerBuiltinHooks } from './hooks';
 
@@ -59,5 +63,9 @@ app.use('/api/vendors', vendorsRouter);
 app.use('/api/purchase-orders', purchaseOrdersRouter);
 app.use('/api/price-levels', priceLevelsRouter);
 app.use('/api/gift-cards', giftCardsRouter);
+app.use('/api/held-orders', heldOrdersRouter);
+app.use('/api/estimates', estimatesRouter);
+app.use('/api/layaway', layawayRouter);
+app.use('/api/cash-drops', cashDropsRouter);
 
 app.use(errorHandler);

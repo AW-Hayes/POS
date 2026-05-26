@@ -73,9 +73,10 @@ model RegisterSession {
   closingNotes String?
   notes        String?
 
-  register Register @relation(fields: [registerId], references: [id])
-  user     User     @relation(fields: [userId], references: [id])
-  orders   Order[]
+  register  Register   @relation(fields: [registerId], references: [id])
+  user      User       @relation(fields: [userId], references: [id])
+  orders    Order[]
+  cashDrops CashDrop[]
 }
 
 // ─── Users & Auth ─────────────────────────────────────────────────────────────
@@ -98,6 +99,8 @@ model User {
   inventoryAdjustments InventoryAdjustment[]
   purchaseOrders       PurchaseOrder[]
   orderReturns         OrderReturn[]
+  layawayDeposits      LayawayDeposit[]
+  cashDrops            CashDrop[]
 
   @@unique([tenantId, email])
 }
@@ -145,13 +148,15 @@ model Product {
   barcode        String?
   price          Float
   cost           Float?
-  taxable        Boolean  @default(true)
-  trackInventory Boolean  @default(true)
-  active         Boolean  @default(true)
-  imageUrl       String?
-  sortOrder      Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  taxable                 Boolean  @default(true)
+  trackInventory          Boolean  @default(true)
+  active                  Boolean  @default(true)
+  imageUrl                String?
+  sortOrder               Int      @default(0)
+  requiresAgeVerification Boolean  @default(false)
+  minAge                  Int?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   tenant             Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   category           Category?            @relation(fields: [categoryId], references: [id])
@@ -274,24 +279,27 @@ model Order {
   sessionId         String?
   userId            String
   customerId        String?
-  status            String    @default("open")
+  status            String    @default("open") // open|completed|voided|refunded|held|estimate|layaway
   subtotal          Float
   taxAmount         Float     @default(0)
   discountAmount    Float     @default(0)
   promotionDiscount Float     @default(0)
   total             Float
   notes             String?
+  heldName          String?
+  estimateExpiresAt DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   completedAt       DateTime?
 
-  location  Location         @relation(fields: [locationId], references: [id])
-  session   RegisterSession? @relation(fields: [sessionId], references: [id])
-  user      User             @relation(fields: [userId], references: [id])
-  customer  Customer?        @relation(fields: [customerId], references: [id])
-  items     OrderItem[]
-  payments  Payment[]
-  returns   OrderReturn[]
+  location        Location         @relation(fields: [locationId], references: [id])
+  session         RegisterSession? @relation(fields: [sessionId], references: [id])
+  user            User             @relation(fields: [userId], references: [id])
+  customer        Customer?        @relation(fields: [customerId], references: [id])
+  items           OrderItem[]
+  payments        Payment[]
+  returns         OrderReturn[]
+  layawayDeposits LayawayDeposit[]
 }
 
 model OrderItem {
@@ -513,4 +521,38 @@ model GiftCardTransaction {
   giftCard GiftCard @relation(fields: [giftCardId], references: [id])
 
   @@index([giftCardId])
+}
+
+// ─── Layaway Deposits ─────────────────────────────────────────────────────────
+
+model LayawayDeposit {
+  id        String   @id @default(cuid())
+  orderId   String
+  userId    String?
+  amount    Float
+  method    String   // "cash" | "card" | "store_credit" | "gift_card" | "other"
+  reference String?
+  note      String?
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user  User? @relation(fields: [userId], references: [id])
+
+  @@index([orderId])
+}
+
+// ─── Cash Drops ───────────────────────────────────────────────────────────────
+
+model CashDrop {
+  id        String   @id @default(cuid())
+  sessionId String
+  userId    String
+  amount    Float
+  note      String?
+  createdAt DateTime @default(now())
+
+  session RegisterSession @relation(fields: [sessionId], references: [id])
+  user    User            @relation(fields: [userId], references: [id])
+
+  @@index([sessionId])
 }

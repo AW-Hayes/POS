@@ -7,12 +7,21 @@ export interface Tenant {
   updatedAt: string;
 }
 
+export interface PaymentTerminalConfig {
+  provider: 'none' | 'stripe' | 'square';
+  environment: 'sandbox' | 'production';
+  apiKey?: string;
+  locationId?: string;
+  readerIds?: string[];
+}
+
 export interface TenantSettings {
   currency: string;
   timezone: string;
   taxRate: number;
   receiptFooter?: string;
   logoUrl?: string;
+  paymentTerminal?: PaymentTerminalConfig;
 }
 
 export interface Location {
@@ -31,7 +40,7 @@ export interface LocationSettings {
   receiptPrinter?: string;
 }
 
-export type TerminalMode = 'touch' | 'desktop';
+export type TerminalMode = 'touch' | 'desktop' | 'line-item' | 'quickfind';
 
 export interface Register {
   id: string;

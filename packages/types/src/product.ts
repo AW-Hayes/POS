@@ -64,6 +64,8 @@ export interface Product {
   active: boolean;
   imageUrl?: string;
   sortOrder: number;
+  requiresAgeVerification: boolean;
+  minAge?: number;
   attributes: ProductAttribute[];
   variants: ProductVariant[];
   createdAt: string;
@@ -82,6 +84,8 @@ export interface CreateProductRequest {
   trackInventory?: boolean;
   imageUrl?: string;
   attributeIds?: string[];
+  requiresAgeVerification?: boolean;
+  minAge?: number;
 }
 
 export interface GenerateVariantsRequest {
