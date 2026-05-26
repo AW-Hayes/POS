@@ -5,6 +5,8 @@ import { authenticate, requireRole } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { qs } from '../lib/qs';
 
+type TxClient = Omit<typeof prisma, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
 export const inventoryRouter = Router();
 inventoryRouter.use(authenticate);
 
@@ -19,38 +21,53 @@ inventoryRouter.get('/', async (req, res, next) => {
     const productId = qs(req.query.productId);
     const lowStock = qs(req.query.lowStock) === 'true';
     const page = Number(qs(req.query.page) ?? '1');
-    const pageSize = Number(qs(req.query.pageSize) ?? '50');
+    const pageSize = Math.min(Number(qs(req.query.pageSize) ?? '50'), 200);
     const skip = (page - 1) * pageSize;
 
-    const where = {
+    const baseWhere = {
       location: { tenantId: req.user!.tenantId },
       ...(locationId ? { locationId } : {}),
       ...(productId ? { productId } : {}),
     };
 
-    const [items, total] = await Promise.all([
-      prisma.inventoryItem.findMany({
-        where,
+    const itemInclude = {
+      product: { select: { id: true, name: true, sku: true, barcode: true, imageUrl: true } },
+      variant: {
         include: {
-          product: { select: { id: true, name: true, sku: true, barcode: true, imageUrl: true } },
-          variant: {
-            include: {
-              attributeValues: { include: { productAttribute: { include: { attribute: true } } } },
-            },
-          },
+          attributeValues: { include: { productAttribute: { include: { attribute: true } } } },
         },
+      },
+    };
+
+    // Prisma cannot compare two columns in a WHERE clause without raw SQL, so for
+    // the low-stock case we fetch all matching rows (with lowStockAt set), filter
+    // in application code, then slice for the requested page.
+    let items: Awaited<ReturnType<typeof prisma.inventoryItem.findMany>>;
+    let total: number;
+
+    if (lowStock) {
+      const all = await prisma.inventoryItem.findMany({
+        where: { ...baseWhere, lowStockAt: { not: null } },
+        include: itemInclude,
         orderBy: { product: { name: 'asc' } },
-        skip,
-        take: pageSize,
-      }),
-      prisma.inventoryItem.count({ where }),
-    ]);
+      });
+      const filtered = all.filter((i) => i.lowStockAt != null && i.quantity <= i.lowStockAt);
+      total = filtered.length;
+      items = filtered.slice(skip, skip + pageSize);
+    } else {
+      [items, total] = await Promise.all([
+        prisma.inventoryItem.findMany({
+          where: baseWhere,
+          include: itemInclude,
+          orderBy: { product: { name: 'asc' } },
+          skip,
+          take: pageSize,
+        }),
+        prisma.inventoryItem.count({ where: baseWhere }),
+      ]);
+    }
 
-    const filtered = lowStock
-      ? items.filter((i) => i.lowStockAt != null && i.quantity <= i.lowStockAt)
-      : items;
-
-    res.json({ success: true, data: filtered, total, page, pageSize, pageCount: Math.ceil(total / pageSize) });
+    res.json({ success: true, data: items, total, page, pageSize, pageCount: Math.ceil(total / pageSize) });
   } catch (err) {
     next(err);
   }
@@ -120,31 +137,35 @@ inventoryRouter.post('/transfer', requireRole('admin', 'manager'), async (req, r
     if (!from) throw new AppError(404, 'Source location not found');
     if (!to) throw new AppError(404, 'Destination location not found');
 
-    const results = await Promise.all(
-      data.items.map(async (item) => {
-        const [out, into] = await Promise.all([
-          adjustInventory({
-            locationId: data.fromLocationId,
-            productId: item.productId,
-            variantId: item.variantId,
-            type: 'transfer_out',
-            delta: -item.quantity,
-            note: data.note,
-            userId: req.user!.userId,
-          }),
-          adjustInventory({
-            locationId: data.toLocationId,
-            productId: item.productId,
-            variantId: item.variantId,
-            type: 'transfer_in',
-            delta: item.quantity,
-            note: data.note,
-            userId: req.user!.userId,
-          }),
-        ]);
-        return { from: out, to: into };
-      }),
-    );
+    // Wrap the entire multi-item transfer in one transaction so a partial failure
+    // doesn't leave inventory at the source without crediting the destination.
+    const results = await prisma.$transaction(async (tx) => {
+      return Promise.all(
+        data.items.map(async (item) => {
+          const [out, into] = await Promise.all([
+            adjustInventory({
+              locationId: data.fromLocationId,
+              productId: item.productId,
+              variantId: item.variantId,
+              type: 'transfer_out',
+              delta: -item.quantity,
+              note: data.note,
+              userId: req.user!.userId,
+            }, tx),
+            adjustInventory({
+              locationId: data.toLocationId,
+              productId: item.productId,
+              variantId: item.variantId,
+              type: 'transfer_in',
+              delta: item.quantity,
+              note: data.note,
+              userId: req.user!.userId,
+            }, tx),
+          ]);
+          return { from: out, to: into };
+        }),
+      );
+    });
 
     res.json({ success: true, data: results });
   } catch (err) {
@@ -189,19 +210,22 @@ inventoryRouter.get('/adjustments', async (req, res, next) => {
 
 // ─── Shared helper ────────────────────────────────────────────────────────────
 
-export async function adjustInventory(params: {
-  locationId: string;
-  productId: string;
-  variantId?: string;
-  type: typeof adjustmentTypeValues[number];
-  delta: number;
-  note?: string;
-  reference?: string;
-  userId?: string;
-}) {
+export async function adjustInventory(
+  params: {
+    locationId: string;
+    productId: string;
+    variantId?: string;
+    type: typeof adjustmentTypeValues[number];
+    delta: number;
+    note?: string;
+    reference?: string;
+    userId?: string;
+  },
+  txClient?: TxClient,
+) {
   const { locationId, productId, variantId, type, delta, note, reference, userId } = params;
 
-  return prisma.$transaction(async (tx) => {
+  async function run(tx: TxClient) {
     // Use findFirst + create to handle nullable variantId in compound unique
     let item = await tx.inventoryItem.findFirst({
       where: { locationId, productId, variantId: variantId ?? null },
@@ -226,5 +250,7 @@ export async function adjustInventory(params: {
     ]);
 
     return updated;
-  });
+  }
+
+  return txClient ? run(txClient) : prisma.$transaction(run);
 }

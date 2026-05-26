@@ -6,8 +6,13 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('pos_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  try {
+    const stored = localStorage.getItem('pos_auth');
+    const token = stored ? (JSON.parse(stored) as { state?: { token?: string } }).state?.token : null;
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+  } catch {
+    // Malformed storage — ignore, request proceeds unauthenticated
+  }
   return config;
 });
 
@@ -15,7 +20,7 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('pos_token');
+      localStorage.removeItem('pos_auth');
       window.location.href = '/login';
     }
     return Promise.reject(err);

@@ -22,7 +22,7 @@ ordersRouter.get('/', async (req, res, next) => {
     const status = qs(req.query.status);
     const customerId = qs(req.query.customerId);
     const page = Number(qs(req.query.page) ?? '1');
-    const pageSize = Number(qs(req.query.pageSize) ?? '50');
+    const pageSize = Math.min(Number(qs(req.query.pageSize) ?? '50'), 200);
     const skip = (page - 1) * pageSize;
 
     const where = {
@@ -59,8 +59,7 @@ const createOrderSchema = z.object({
   items: z.array(z.object({
     productId: z.string(),
     variantId: z.string().optional(),
-    quantity: z.number().positive(),
-    price: z.number().min(0).optional(),
+    quantity: z.number().int().positive(),
     discount: z.number().min(0).default(0),
   })).min(1),
 });
@@ -96,9 +95,10 @@ ordersRouter.post('/', async (req, res, next) => {
       const variant = item.variantId ? product.variants.find((v) => v.id === item.variantId) : undefined;
       if (item.variantId && !variant) throw new AppError(400, `Variant ${item.variantId} not found`);
 
-      const unitPrice = item.price ?? variant?.price ?? product.price;
+      const unitPrice = variant?.price ?? product.price;
       const taxRate = product.taxable ? defaultTaxRate : 0;
-      const lineDiscount = item.discount * item.quantity;
+      const discountPerUnit = Math.min(item.discount, unitPrice);
+      const lineDiscount = discountPerUnit * item.quantity;
       const lineSubtotal = unitPrice * item.quantity - lineDiscount;
       const lineTax = lineSubtotal * taxRate;
 
@@ -113,7 +113,7 @@ ordersRouter.post('/', async (req, res, next) => {
         sku: variant?.sku ?? product.sku ?? undefined,
         price: unitPrice,
         quantity: item.quantity,
-        discount: item.discount,
+        discount: discountPerUnit,
         taxRate,
         total: lineSubtotal + lineTax,
       };
