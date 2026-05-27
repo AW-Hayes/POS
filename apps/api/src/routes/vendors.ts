@@ -27,7 +27,7 @@ vendorsRouter.get('/', async (req, res, next) => {
 const vendorSchema = z.object({
   name: z.string().min(1),
   code: z.string().optional(),
-  email: z.string().email().optional(),
+  email: z.preprocess((v) => (v === '' ? undefined : v), z.string().email().optional()),
   phone: z.string().optional(),
   address: z.string().optional(),
   notes: z.string().optional(),

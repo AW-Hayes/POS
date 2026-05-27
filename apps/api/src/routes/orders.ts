@@ -257,7 +257,7 @@ ordersRouter.get('/:id', async (req, res, next) => {
 
 const completeOrderSchema = z.object({
   payments: z.array(z.object({
-    method: z.enum(['cash', 'card', 'store_credit', 'gift_card', 'other']),
+    method: z.enum(['cash', 'card', 'store_credit', 'gift_card', 'house_account', 'other']),
     amount: z.number().positive(),
     reference: z.string().optional(),
     giftCardId: z.string().optional(),
@@ -318,6 +318,27 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
               amount: p.amount,
               balanceAfter: updated!.balance,
             },
+          });
+        }
+      }
+
+      // Update house account AR balance for any house_account payments
+      const houseAccountTotal = payments
+        .filter((p) => p.method === 'house_account')
+        .reduce((s, p) => s + p.amount, 0);
+
+      if (houseAccountTotal > 0 && order.customerId) {
+        const customer = await tx.customer.findFirst({
+          where: { id: order.customerId },
+        });
+        if (customer) {
+          const newBalance = customer.arBalance + houseAccountTotal;
+          if (customer.creditLimit != null && newBalance > customer.creditLimit) {
+            throw new AppError(400, `Charge would exceed credit limit of ${customer.creditLimit}`);
+          }
+          await tx.customer.update({
+            where: { id: customer.id },
+            data: { arBalance: { increment: houseAccountTotal } },
           });
         }
       }
