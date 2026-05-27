@@ -32,6 +32,7 @@ const productInclude = {
     include: { attributeValues: { include: { productAttribute: { include: { attribute: true } } } } },
     orderBy: { sortOrder: 'asc' as const },
   },
+  priceBreaks: { orderBy: [{ variantId: 'asc' as const }, { minQty: 'asc' as const }] },
 };
 
 productsRouter.get('/', async (req, res, next) => {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Input } from '@/components/ui/input';
@@ -10,8 +10,8 @@ import {
 } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { formatCurrency } from '@/lib/utils';
-import { Search, Package, Plus, Pencil, Archive } from 'lucide-react';
-import type { Product } from '@pos/types';
+import { Search, Package, Plus, Pencil, Archive, Trash2 } from 'lucide-react';
+import type { Product, PriceBreak } from '@pos/types';
 
 interface Category { id: string; name: string }
 
@@ -36,6 +36,8 @@ export function ProductsPage() {
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState<ProductFormData>(EMPTY_FORM);
   const [formError, setFormError] = useState('');
+  const [breaks, setBreaks] = useState<PriceBreak[]>([]);
+  const [newBreak, setNewBreak] = useState({ minQty: '', price: '' });
 
   const { data, isLoading } = useQuery({
     queryKey: ['products', search],
@@ -69,6 +71,29 @@ export function ProductsPage() {
     mutationFn: (id: string) => api.delete(`/products/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['products'] }),
   });
+
+  const addBreakMutation = useMutation({
+    mutationFn: (data: { minQty: number; price: number }) =>
+      api.post(`/price-breaks/products/${editing!.id}`, data).then((r) => r.data.data as PriceBreak),
+    onSuccess: (pb) => {
+      setBreaks((prev) => [...prev, pb].sort((a, b) => a.minQty - b.minQty));
+      setNewBreak({ minQty: '', price: '' });
+    },
+  });
+
+  const deleteBreakMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/price-breaks/${id}`),
+    onSuccess: (_, id) => setBreaks((prev) => prev.filter((b) => b.id !== id)),
+  });
+
+  useEffect(() => {
+    if (editing) {
+      api.get(`/price-breaks/products/${editing.id}`).then((r) => setBreaks(r.data.data));
+    } else {
+      setBreaks([]);
+      setNewBreak({ minQty: '', price: '' });
+    }
+  }, [editing]);
 
   function openCreate() {
     setEditing(null);
@@ -319,6 +344,75 @@ export function ProductsPage() {
                 Track Inventory
               </label>
             </div>
+
+            {editing && (
+              <div className="space-y-2">
+                <Label>Volume Price Breaks</Label>
+                <div className="border rounded-lg overflow-hidden text-sm">
+                  {breaks.length > 0 ? (
+                    <table className="w-full">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="text-left p-2 font-medium">Min Qty</th>
+                          <th className="text-left p-2 font-medium">Price</th>
+                          <th className="p-2" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {breaks.map((b) => (
+                          <tr key={b.id}>
+                            <td className="p-2">{b.minQty}+</td>
+                            <td className="p-2">{formatCurrency(b.price)}</td>
+                            <td className="p-2 text-right">
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                                onClick={() => deleteBreakMutation.mutate(b.id)}
+                                disabled={deleteBreakMutation.isPending}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="p-3 text-xs text-muted-foreground">No price breaks configured</p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    type="number" min="2" placeholder="Min qty"
+                    value={newBreak.minQty}
+                    onChange={(e) => setNewBreak((f) => ({ ...f, minQty: e.target.value }))}
+                    className="w-28"
+                  />
+                  <Input
+                    type="number" min="0" step="0.01" placeholder="Price"
+                    value={newBreak.price}
+                    onChange={(e) => setNewBreak((f) => ({ ...f, price: e.target.value }))}
+                    className="w-28"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={!newBreak.minQty || !newBreak.price || addBreakMutation.isPending}
+                    onClick={() =>
+                      addBreakMutation.mutate({
+                        minQty: parseInt(newBreak.minQty),
+                        price: parseFloat(newBreak.price),
+                      })
+                    }
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" />Add
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {formError && <p className="text-sm text-destructive">{formError}</p>}
 

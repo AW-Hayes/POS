@@ -123,22 +123,37 @@ export function TerminalPage() {
     setPriceInput('');
   }
 
+  function bestBreakPrice(
+    breaks: Array<{ minQty: number; price: number }> | undefined,
+    qty: number,
+    listPrice: number,
+  ): number {
+    if (!breaks?.length) return listPrice;
+    const best = breaks
+      .filter((pb) => pb.minQty <= qty)
+      .sort((a, b) => b.minQty - a.minQty)[0];
+    return best ? best.price : listPrice;
+  }
+
   const addToCart = useCallback((product: Product, variantId?: string) => {
     const variant = variantId ? product.variants.find((v) => v.id === variantId) : undefined;
-    const price = variant?.price ?? product.price;
+    const listPrice = variant?.price ?? product.price;
     const cost = (variant as { cost?: number } | undefined)?.cost ?? (product as { cost?: number }).cost ?? undefined;
     const name = product.name + (variant ? ` (${variant.attributeValues.map((v) => v.value).join(' / ')})` : '');
+    const breaks = (product.priceBreaks ?? []).filter((pb) => !pb.variantId || pb.variantId === variantId);
 
     setCart((prev) => {
       const key = variantId ?? product.id;
       const existing = prev.find((i) => (variantId ? i.variantId === key : i.productId === key && !i.variantId));
       if (existing) {
+        const newQty = existing.quantity + 1;
         return prev.map((i) =>
           (variantId ? i.variantId === key : i.productId === key && !i.variantId)
-            ? { ...i, quantity: i.quantity + 1 }
+            ? { ...i, quantity: newQty, price: bestBreakPrice(i.priceBreaks, newQty, i.listPrice ?? i.price) }
             : i,
         );
       }
+      const price = bestBreakPrice(breaks, 1, listPrice);
       return [
         ...prev,
         {
@@ -147,7 +162,9 @@ export function TerminalPage() {
           name,
           sku: variant?.sku ?? product.sku ?? undefined,
           price,
+          listPrice,
           cost,
+          priceBreaks: breaks.length ? breaks : undefined,
           quantity: 1,
           discount: 0,
           requiresAgeVerification: product.requiresAgeVerification,
@@ -159,14 +176,24 @@ export function TerminalPage() {
   function updateQty(index: number, delta: number) {
     setCart((prev) =>
       prev
-        .map((item, i) => (i === index ? { ...item, quantity: item.quantity + delta } : item))
+        .map((item, i) => {
+          if (i !== index) return item;
+          const newQty = item.quantity + delta;
+          return { ...item, quantity: newQty, price: bestBreakPrice(item.priceBreaks, newQty, item.listPrice ?? item.price) };
+        })
         .filter((item) => item.quantity > 0),
     );
   }
 
   function setQty(index: number, qty: number) {
     if (qty <= 0) return;
-    setCart((prev) => prev.map((item, i) => (i === index ? { ...item, quantity: qty } : item)));
+    setCart((prev) =>
+      prev.map((item, i) =>
+        i === index
+          ? { ...item, quantity: qty, price: bestBreakPrice(item.priceBreaks, qty, item.listPrice ?? item.price) }
+          : item,
+      ),
+    );
   }
 
   const subtotal = cart.reduce((s, i) => s + (i.price - i.discount) * i.quantity, 0);
