@@ -411,3 +411,153 @@ ordersRouter.post('/:id/void', requireRole('admin', 'manager'), async (req, res,
     next(err);
   }
 });
+
+// ─── Return order items ────────────────────────────────────────────────────────
+
+const returnSchema = z.object({
+  items: z.array(z.object({
+    orderItemId: z.string(),
+    quantity: z.number().positive(),
+  })).min(1),
+  reason: z.string().optional(),
+  refundMethod: z.enum(['cash', 'card', 'store_credit']),
+  restockItems: z.boolean().default(true),
+});
+
+ordersRouter.post('/:id/return', async (req, res, next) => {
+  try {
+    const order = await prisma.order.findFirst({
+      where: { id: req.params.id, tenantId: req.user!.tenantId },
+      include: { items: true, returns: { include: { items: true } } },
+    });
+    if (!order) throw new AppError(404, 'Order not found');
+    if (order.status !== 'completed') throw new AppError(400, 'Only completed orders can be returned');
+
+    const { items, reason, refundMethod, restockItems } = returnSchema.parse(req.body);
+
+    // Build map of already-returned quantities per order item
+    const alreadyReturned = new Map<string, number>();
+    for (const r of order.returns) {
+      for (const ri of r.items) {
+        alreadyReturned.set(ri.orderItemId, (alreadyReturned.get(ri.orderItemId) ?? 0) + ri.quantity);
+      }
+    }
+
+    // Validate each line
+    const returnLines: Array<{ orderItem: typeof order.items[0]; quantity: number }> = [];
+    for (const line of items) {
+      const orderItem = order.items.find((i) => i.id === line.orderItemId);
+      if (!orderItem) throw new AppError(400, `Order item ${line.orderItemId} not found`);
+      const maxReturnable = orderItem.quantity - (alreadyReturned.get(orderItem.id) ?? 0);
+      if (line.quantity > maxReturnable) {
+        throw new AppError(400, `Cannot return ${line.quantity} of "${orderItem.name}" — only ${maxReturnable} available`);
+      }
+      returnLines.push({ orderItem, quantity: line.quantity });
+    }
+
+    // Calculate totals
+    let returnSubtotal = 0;
+    let returnTax = 0;
+    for (const { orderItem, quantity } of returnLines) {
+      const linePrice = (orderItem.price - orderItem.discount) * quantity;
+      returnSubtotal += linePrice;
+      returnTax += linePrice * orderItem.taxRate;
+    }
+    const returnTotal = returnSubtotal + returnTax;
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Create the return record
+      const orderReturn = await tx.orderReturn.create({
+        data: {
+          orderId: order.id,
+          userId: req.user!.userId,
+          reason,
+          subtotal: returnSubtotal,
+          taxAmount: returnTax,
+          total: returnTotal,
+          items: {
+            create: returnLines.map(({ orderItem, quantity }) => ({
+              orderItemId: orderItem.id,
+              quantity,
+              price: orderItem.price - orderItem.discount,
+              taxRate: orderItem.taxRate,
+              total: (orderItem.price - orderItem.discount) * quantity * (1 + orderItem.taxRate),
+            })),
+          },
+          refunds: {
+            create: [{ method: refundMethod, amount: returnTotal }],
+          },
+        },
+        include: { items: true, refunds: true },
+      });
+
+      // Restock inventory
+      if (restockItems) {
+        for (const { orderItem, quantity } of returnLines) {
+          if (!orderItem.productId) continue;
+          let inv = await tx.inventoryItem.findFirst({
+            where: { locationId: order.locationId, productId: orderItem.productId, variantId: orderItem.variantId ?? null },
+          });
+          if (!inv) {
+            inv = await tx.inventoryItem.create({
+              data: { locationId: order.locationId, productId: orderItem.productId, variantId: orderItem.variantId ?? null, quantity: 0 },
+            });
+          }
+          const updated = await tx.inventoryItem.update({
+            where: { id: inv.id },
+            data: { quantity: { increment: quantity } },
+          });
+          await tx.inventoryAdjustment.create({
+            data: {
+              inventoryItemId: inv.id,
+              userId: req.user!.userId,
+              type: 'return',
+              delta: quantity,
+              quantityAfter: updated.quantity,
+              reference: `return:${orderReturn.id}`,
+              note: reason ? `Return: ${reason}` : 'Customer return',
+            },
+          });
+        }
+      }
+
+      // Issue store credit as a gift card
+      let storeCreditCode: string | undefined;
+      if (refundMethod === 'store_credit' && returnTotal > 0) {
+        const code = `SC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+        await tx.giftCard.create({
+          data: {
+            tenantId: req.user!.tenantId,
+            code,
+            balance: returnTotal,
+            initialBalance: returnTotal,
+          },
+        });
+        storeCreditCode = code;
+      }
+
+      // Mark order as refunded if every item is now fully returned
+      const allReturnItems = await tx.orderReturnItem.findMany({
+        where: { return: { orderId: order.id } },
+      });
+      const returnedQtyByItem = new Map<string, number>();
+      for (const ri of allReturnItems) {
+        returnedQtyByItem.set(ri.orderItemId, (returnedQtyByItem.get(ri.orderItemId) ?? 0) + ri.quantity);
+      }
+      const fullyReturned = order.items.every((i) => (returnedQtyByItem.get(i.id) ?? 0) >= i.quantity);
+      if (fullyReturned) {
+        await tx.order.update({ where: { id: order.id }, data: { status: 'refunded' } });
+      }
+
+      return { orderReturn, storeCreditCode };
+    });
+
+    res.status(201).json({
+      success: true,
+      data: result.orderReturn,
+      ...(result.storeCreditCode ? { storeCreditCode: result.storeCreditCode } : {}),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
