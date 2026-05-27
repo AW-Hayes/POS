@@ -10,7 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
 } from '@/components/ui/dialog';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { Ban, RotateCcw } from 'lucide-react';
+import { Ban, RotateCcw, Receipt, Printer, Mail, Check } from 'lucide-react';
 import type { Order, OrderStatus } from '@pos/types';
 
 const STATUS_VARIANTS: Record<OrderStatus, 'success' | 'secondary' | 'destructive' | 'warning'> = {
@@ -59,6 +59,17 @@ export function OrdersPage() {
   const [restockItems, setRestockItems] = useState(true);
   const [returnError, setReturnError] = useState('');
   const [storeCreditCode, setStoreCreditCode] = useState('');
+
+  // Receipt dialog
+  const [receiptTarget, setReceiptTarget] = useState<Order | null>(null);
+  const [receiptEmail, setReceiptEmail] = useState('');
+  const [receiptSent, setReceiptSent] = useState(false);
+
+  const receiptEmailMutation = useMutation({
+    mutationFn: ({ id, email }: { id: string; email: string }) =>
+      api.post(`/receipts/orders/${id}/email`, { email: email || undefined }),
+    onSuccess: () => setReceiptSent(true),
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ['orders', status],
@@ -199,15 +210,30 @@ export function OrdersPage() {
                   <td className="p-3">
                     <div className="flex justify-end gap-1">
                       {order.status === 'completed' && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                          title="Return / Refund"
-                          onClick={() => openReturn(order)}
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        </Button>
+                        <>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            title="Receipt"
+                            onClick={() => {
+                              setReceiptTarget(order);
+                              setReceiptEmail((order.customer as { email?: string } | undefined)?.email ?? '');
+                              setReceiptSent(false);
+                            }}
+                          >
+                            <Receipt className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            title="Return / Refund"
+                            onClick={() => openReturn(order)}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
                       )}
                       {(order.status === 'open' || order.status === 'completed') && (
                         <Button
@@ -295,6 +321,62 @@ export function OrdersPage() {
               Done
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Receipt dialog */}
+      <Dialog open={!!receiptTarget} onOpenChange={(o) => { if (!o) { setReceiptTarget(null); setReceiptSent(false); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Receipt — #{receiptTarget?.id.slice(-8).toUpperCase()}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              onClick={() => receiptTarget && window.open(`/api/receipts/orders/${receiptTarget.id}/print`, '_blank')}
+            >
+              <Printer className="h-4 w-4" />
+              Print Receipt
+            </Button>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Email Receipt</p>
+              {receiptSent ? (
+                <div className="flex items-center gap-2 text-sm text-green-600">
+                  <Check className="h-4 w-4" />
+                  Sent to {receiptEmailMutation.variables?.email || 'customer'}
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    placeholder="customer@example.com"
+                    value={receiptEmail}
+                    onChange={(e) => setReceiptEmail(e.target.value)}
+                  />
+                  <Button
+                    size="sm"
+                    className="gap-1.5 shrink-0"
+                    disabled={receiptEmailMutation.isPending || !receiptEmail}
+                    onClick={() => receiptTarget && receiptEmailMutation.mutate({ id: receiptTarget.id, email: receiptEmail })}
+                  >
+                    <Mail className="h-3.5 w-3.5" />
+                    {receiptEmailMutation.isPending ? 'Sending…' : 'Send'}
+                  </Button>
+                </div>
+              )}
+              {receiptEmailMutation.isError && (
+                <p className="text-xs text-destructive">
+                  {receiptEmailMutation.error instanceof Error ? receiptEmailMutation.error.message : 'Failed to send'}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex justify-end pt-2">
+            <Button variant="outline" onClick={() => { setReceiptTarget(null); setReceiptSent(false); }}>Close</Button>
+          </div>
         </DialogContent>
       </Dialog>
 

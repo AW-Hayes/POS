@@ -1,17 +1,18 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useTerminalStore } from '@/stores/terminal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { formatCurrency } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import {
-  Search, Plus, Minus, Trash2, Monitor, Tablet,
+  Search, Plus, Minus, Trash2, Tablet,
   AlertCircle, List, Grid3x3, BookOpen, PauseCircle,
-  FileText, ChevronDown,
+  FileText, DollarSign, PackagePlus,
 } from 'lucide-react';
 import type { Product } from '@pos/types';
 import { CheckoutModal } from '@/checkout';
@@ -39,6 +40,14 @@ export function TerminalPage() {
   const [heldPanelOpen, setHeldPanelOpen] = useState(false);
   const [holdNameInput, setHoldNameInput] = useState('');
   const [holdDialogOpen, setHoldDialogOpen] = useState(false);
+  const [miscOpen, setMiscOpen] = useState(false);
+  const [miscForm, setMiscForm] = useState({ name: '', price: '', qty: '1' });
+  const [miscError, setMiscError] = useState('');
+  const [cashDropOpen, setCashDropOpen] = useState(false);
+  const [cashDropAmount, setCashDropAmount] = useState('');
+  const [cashDropNote, setCashDropNote] = useState('');
+  const barcodeBuffer = useRef('');
+  const barcodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isTouch = mode === 'touch';
   const isLineItem = mode === 'line-item';
@@ -183,6 +192,49 @@ export function TerminalPage() {
     },
   });
 
+  const cashDropMutation = useMutation({
+    mutationFn: ({ amount, note }: { amount: number; note?: string }) =>
+      api.post(`/cash-drops/sessions/${sessionId}`, { amount, note }),
+    onSuccess: () => {
+      setCashDropOpen(false);
+      setCashDropAmount('');
+      setCashDropNote('');
+    },
+  });
+
+  // Barcode scanner: detect rapid keystrokes from HID scanner (fires keydown globally)
+  const handleBarcodeInput = useCallback(async (barcode: string) => {
+    if (!barcode.trim()) return;
+    const res = await api.get('/products', { params: { barcode: barcode.trim() } });
+    const matches: Product[] = res.data.data ?? [];
+    if (matches.length === 1) {
+      const product = matches[0];
+      if (product.variants.length > 0) setVariantProduct(product);
+      else addToCart(product);
+    }
+  }, [addToCart]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+      if (e.key === 'Enter') {
+        const buf = barcodeBuffer.current;
+        barcodeBuffer.current = '';
+        if (barcodeTimer.current) { clearTimeout(barcodeTimer.current); barcodeTimer.current = null; }
+        if (buf.length > 2) handleBarcodeInput(buf);
+        return;
+      }
+      if (e.key.length === 1) {
+        barcodeBuffer.current += e.key;
+        if (barcodeTimer.current) clearTimeout(barcodeTimer.current);
+        barcodeTimer.current = setTimeout(() => { barcodeBuffer.current = ''; }, 100);
+      }
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [handleBarcodeInput]);
+
   // ── Mode toggle buttons ───────────────────────────────────────────────────────
 
   const modeButtons: Array<{ id: TerminalMode; icon: React.ReactNode; label: string }> = [
@@ -210,9 +262,30 @@ export function TerminalPage() {
                 placeholder="Search products or scan barcode…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={async (e) => {
+                  if (e.key === 'Enter' && search.trim()) {
+                    const res = await api.get('/products', { params: { barcode: search.trim() } });
+                    const matches: Product[] = res.data.data ?? [];
+                    if (matches.length === 1) {
+                      const product = matches[0];
+                      if (product.variants.length > 0) setVariantProduct(product);
+                      else addToCart(product);
+                      setSearch('');
+                    }
+                  }
+                }}
               />
             </div>
           )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0 gap-1"
+            onClick={() => { setMiscForm({ name: '', price: '', qty: '1' }); setMiscError(''); setMiscOpen(true); }}
+          >
+            <PackagePlus className="h-3.5 w-3.5" />
+            Misc
+          </Button>
           {!isGrid && <span className="flex-1 text-sm font-medium text-muted-foreground">{mode === 'line-item' ? 'Line Item Entry' : 'QuickFind'}</span>}
 
           {/* Mode switcher */}
@@ -324,6 +397,15 @@ export function TerminalPage() {
                 <AlertCircle className="h-3 w-3" />
                 No register
               </span>
+            )}
+            {sessionId && (
+              <button
+                className="text-muted-foreground hover:text-foreground"
+                title="Record cash drop"
+                onClick={() => { setCashDropAmount(''); setCashDropNote(''); setCashDropOpen(true); }}
+              >
+                <DollarSign className="h-4 w-4" />
+              </button>
             )}
             {/* Held orders dropdown */}
             <button
@@ -450,6 +532,122 @@ export function TerminalPage() {
           )}
         </div>
       </div>
+
+      {/* ── Misc item dialog ─────────────────────────────────────────────────── */}
+      {miscOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setMiscOpen(false)} />
+          <div className="relative bg-background rounded-lg shadow-xl w-80 p-6 space-y-4">
+            <h3 className="font-semibold">Misc / Open-Price Item</h3>
+            <div className="space-y-1.5">
+              <Label htmlFor="misc-name">Description *</Label>
+              <Input
+                id="misc-name"
+                autoFocus
+                placeholder="e.g. Labor charge, Bag fee…"
+                value={miscForm.name}
+                onChange={(e) => setMiscForm((f) => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="misc-price">Price *</Label>
+                <Input
+                  id="misc-price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={miscForm.price}
+                  onChange={(e) => setMiscForm((f) => ({ ...f, price: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="misc-qty">Qty</Label>
+                <Input
+                  id="misc-qty"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={miscForm.qty}
+                  onChange={(e) => setMiscForm((f) => ({ ...f, qty: e.target.value }))}
+                />
+              </div>
+            </div>
+            {miscError && <p className="text-sm text-destructive">{miscError}</p>}
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setMiscOpen(false)}>Cancel</Button>
+              <Button
+                className="flex-1"
+                onClick={() => {
+                  const price = parseFloat(miscForm.price);
+                  const qty = parseInt(miscForm.qty, 10);
+                  if (!miscForm.name.trim()) return setMiscError('Description is required');
+                  if (isNaN(price) || price < 0) return setMiscError('Enter a valid price');
+                  if (isNaN(qty) || qty < 1) return setMiscError('Enter a valid quantity');
+                  setCart((prev) => [...prev, { name: miscForm.name.trim(), price, quantity: qty, discount: 0 }]);
+                  setMiscOpen(false);
+                }}
+              >
+                Add to Cart
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Cash drop dialog ──────────────────────────────────────────────────── */}
+      {cashDropOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setCashDropOpen(false)} />
+          <div className="relative bg-background rounded-lg shadow-xl w-80 p-6 space-y-4">
+            <h3 className="font-semibold">Record Cash Drop</h3>
+            <p className="text-sm text-muted-foreground">Enter the amount of cash being removed from the drawer.</p>
+            <div className="space-y-1.5">
+              <Label htmlFor="drop-amount">Amount *</Label>
+              <Input
+                id="drop-amount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                autoFocus
+                placeholder="0.00"
+                value={cashDropAmount}
+                onChange={(e) => setCashDropAmount(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const amount = parseFloat(cashDropAmount);
+                    if (!isNaN(amount) && amount > 0) cashDropMutation.mutate({ amount, note: cashDropNote.trim() || undefined });
+                  }
+                }}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="drop-note">Note</Label>
+              <Input
+                id="drop-note"
+                placeholder="e.g. Safe drop"
+                value={cashDropNote}
+                onChange={(e) => setCashDropNote(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setCashDropOpen(false)}>Cancel</Button>
+              <Button
+                className="flex-1"
+                disabled={cashDropMutation.isPending || !cashDropAmount}
+                onClick={() => {
+                  const amount = parseFloat(cashDropAmount);
+                  if (isNaN(amount) || amount <= 0) return;
+                  cashDropMutation.mutate({ amount, note: cashDropNote.trim() || undefined });
+                }}
+              >
+                {cashDropMutation.isPending ? 'Saving…' : 'Record Drop'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Hold dialog ──────────────────────────────────────────────────────── */}
       {holdDialogOpen && (
