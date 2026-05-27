@@ -9,7 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
 } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Search, AlertTriangle, SlidersHorizontal } from 'lucide-react';
+import { Search, AlertTriangle, SlidersHorizontal, PackagePlus } from 'lucide-react';
 import type { InventoryWithProduct } from '@pos/types';
 
 const ADJUSTMENT_TYPES = [
@@ -26,6 +26,14 @@ interface AdjustFormData {
   note: string;
 }
 
+interface ReceiveFormData {
+  locationId: string;
+  productId: string;
+  variantId: string;
+  quantity: string;
+  note: string;
+}
+
 export function InventoryPage() {
   const queryClient = useQueryClient();
   const [showLowStock, setShowLowStock] = useState(false);
@@ -33,6 +41,14 @@ export function InventoryPage() {
   const [adjustItem, setAdjustItem] = useState<InventoryWithProduct | null>(null);
   const [form, setForm] = useState<AdjustFormData>({ delta: '', type: 'adjustment', note: '' });
   const [formError, setFormError] = useState('');
+
+  // Receive stock dialog state
+  const [showReceive, setShowReceive] = useState(false);
+  const [receiveSearch, setReceiveSearch] = useState('');
+  const [receiveForm, setReceiveForm] = useState<ReceiveFormData>({
+    locationId: '', productId: '', variantId: '', quantity: '', note: '',
+  });
+  const [receiveError, setReceiveError] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['inventory', showLowStock],
@@ -44,6 +60,23 @@ export function InventoryPage() {
     search ? item.product.name.toLowerCase().includes(search.toLowerCase()) : true,
   );
 
+  const { data: locationsData } = useQuery({
+    queryKey: ['locations'],
+    queryFn: () => api.get('/locations').then((r) => r.data.data),
+  });
+  const locations: { id: string; name: string }[] = locationsData ?? [];
+
+  const { data: productSearchData } = useQuery({
+    queryKey: ['products-search', receiveSearch],
+    queryFn: () =>
+      api.get('/products', { params: { q: receiveSearch || undefined, pageSize: 20 } }).then((r) => r.data.data),
+    enabled: showReceive,
+  });
+  const productResults: { id: string; name: string; sku?: string; variants: { id: string; sku?: string; attributeValues: { value: string }[] }[] }[] =
+    productSearchData ?? [];
+
+  const selectedProduct = productResults.find((p) => p.id === receiveForm.productId);
+
   const adjustMutation = useMutation({
     mutationFn: (payload: object) => api.post('/inventory/adjust', payload),
     onSuccess: () => {
@@ -52,6 +85,20 @@ export function InventoryPage() {
     },
     onError: (err: unknown) => {
       setFormError(err instanceof Error ? err.message : 'Adjustment failed');
+    },
+  });
+
+  const receiveMutation = useMutation({
+    mutationFn: (payload: object) => api.post('/inventory/adjust', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      setShowReceive(false);
+      setReceiveSearch('');
+      setReceiveForm({ locationId: '', productId: '', variantId: '', quantity: '', note: '' });
+      setReceiveError('');
+    },
+    onError: (err: unknown) => {
+      setReceiveError(err instanceof Error ? err.message : 'Failed to record stock');
     },
   });
 
@@ -78,6 +125,24 @@ export function InventoryPage() {
     });
   }
 
+  function handleReceiveSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setReceiveError('');
+    if (!receiveForm.locationId) return setReceiveError('Select a location');
+    if (!receiveForm.productId) return setReceiveError('Select a product');
+    const qty = parseFloat(receiveForm.quantity);
+    if (isNaN(qty) || qty === 0) return setReceiveError('Enter a non-zero quantity');
+
+    receiveMutation.mutate({
+      locationId: receiveForm.locationId,
+      productId: receiveForm.productId,
+      variantId: receiveForm.variantId || undefined,
+      type: 'purchase',
+      delta: qty,
+      note: receiveForm.note.trim() || undefined,
+    });
+  }
+
   const variantLabel = (item: InventoryWithProduct) =>
     item.variant?.attributeValues.map((v) => v.value).join(' / ') ?? null;
 
@@ -85,14 +150,24 @@ export function InventoryPage() {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Inventory</h1>
-        <Button
-          variant={showLowStock ? 'destructive' : 'outline'}
-          size="sm"
-          onClick={() => setShowLowStock((v) => !v)}
-        >
-          <AlertTriangle className="h-4 w-4 mr-1" />
-          {showLowStock ? 'Showing low stock' : 'Show low stock'}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { setShowReceive(true); setReceiveSearch(''); }}
+          >
+            <PackagePlus className="h-4 w-4 mr-1" />
+            Receive Stock
+          </Button>
+          <Button
+            variant={showLowStock ? 'destructive' : 'outline'}
+            size="sm"
+            onClick={() => setShowLowStock((v) => !v)}
+          >
+            <AlertTriangle className="h-4 w-4 mr-1" />
+            {showLowStock ? 'Showing low stock' : 'Show low stock'}
+          </Button>
+        </div>
       </div>
 
       <div className="relative max-w-sm">
@@ -171,6 +246,119 @@ export function InventoryPage() {
           </table>
         </div>
       )}
+
+      {/* Receive Stock dialog */}
+      <Dialog open={showReceive} onOpenChange={(open) => { if (!open) { setShowReceive(false); setReceiveError(''); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Receive Stock</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleReceiveSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Location *</Label>
+              <Select
+                value={receiveForm.locationId}
+                onValueChange={(v) => setReceiveForm((f) => ({ ...f, locationId: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select location…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {locations.map((loc) => (
+                    <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Product *</Label>
+              <Input
+                placeholder="Search by name or SKU…"
+                value={receiveSearch}
+                onChange={(e) => {
+                  setReceiveSearch(e.target.value);
+                  setReceiveForm((f) => ({ ...f, productId: '', variantId: '' }));
+                }}
+              />
+              {productResults.length > 0 && !receiveForm.productId && (
+                <div className="border rounded-md max-h-40 overflow-y-auto divide-y text-sm">
+                  {productResults.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors"
+                      onClick={() => {
+                        setReceiveForm((f) => ({ ...f, productId: p.id, variantId: '' }));
+                        setReceiveSearch(p.name);
+                      }}
+                    >
+                      <span className="font-medium">{p.name}</span>
+                      {p.sku && <span className="text-muted-foreground ml-2">{p.sku}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {selectedProduct && selectedProduct.variants.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Variant</Label>
+                <Select
+                  value={receiveForm.variantId}
+                  onValueChange={(v) => setReceiveForm((f) => ({ ...f, variantId: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="No variant (base product)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Base product</SelectItem>
+                    {selectedProduct.variants.map((v) => (
+                      <SelectItem key={v.id} value={v.id}>
+                        {v.attributeValues.map((av) => av.value).join(' / ')}
+                        {v.sku && ` — ${v.sku}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="recv-qty">Quantity *</Label>
+              <Input
+                id="recv-qty"
+                type="number"
+                step="any"
+                value={receiveForm.quantity}
+                onChange={(e) => setReceiveForm((f) => ({ ...f, quantity: e.target.value }))}
+                placeholder="e.g. 50"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="recv-note">Note</Label>
+              <Input
+                id="recv-note"
+                value={receiveForm.note}
+                onChange={(e) => setReceiveForm((f) => ({ ...f, note: e.target.value }))}
+                placeholder="e.g. Initial stock, PO #1234"
+              />
+            </div>
+
+            {receiveError && <p className="text-sm text-destructive">{receiveError}</p>}
+
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button type="button" variant="outline">Cancel</Button>
+              </DialogClose>
+              <Button type="submit" disabled={receiveMutation.isPending}>
+                {receiveMutation.isPending ? 'Saving…' : 'Record Stock'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!adjustItem} onOpenChange={(open) => !open && setAdjustItem(null)}>
         <DialogContent>
