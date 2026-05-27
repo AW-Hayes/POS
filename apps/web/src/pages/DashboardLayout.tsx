@@ -1,12 +1,11 @@
-import { useState } from 'react';
-import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/auth';
 import { useTerminalStore } from '@/stores/terminal';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { formatCurrency } from '@/lib/utils';
-import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
@@ -17,8 +16,25 @@ import {
   LayoutDashboard, ShoppingCart, Package, Warehouse, ClipboardList,
   Users, Settings, LogOut, ShoppingBag, BarChart3, Building2,
   Truck, Tag, Layers, CreditCard, FileText, Archive, Clock, ChevronDown,
-  DollarSign, RotateCcw, ClipboardCheck, Wrench, PackageOpen,
+  DollarSign, RotateCcw, ClipboardCheck, Wrench, PackageOpen, Menu, X, Sun, Moon,
 } from 'lucide-react';
+
+// ── Theme hook ────────────────────────────────────────────────────────────────
+
+function useTheme() {
+  const [dark, setDark] = useState(() =>
+    document.documentElement.classList.contains('dark'),
+  );
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', dark);
+    localStorage.setItem('theme', dark ? 'dark' : 'light');
+  }, [dark]);
+
+  return { dark, toggle: () => setDark((d) => !d) };
+}
+
+// ── Nav config ────────────────────────────────────────────────────────────────
 
 type NavItem = {
   to: string;
@@ -30,14 +46,12 @@ type NavItem = {
 
 type NavGroup = {
   label: string;
-  icon: React.ElementType;
   items: NavItem[];
 };
 
 const allGroups: NavGroup[] = [
   {
     label: 'Sales',
-    icon: ClipboardList,
     items: [
       { to: '/orders',          label: 'Orders',          icon: ClipboardList },
       { to: '/returns',         label: 'Returns',         icon: RotateCcw },
@@ -48,7 +62,6 @@ const allGroups: NavGroup[] = [
   },
   {
     label: 'Catalog',
-    icon: Package,
     items: [
       { to: '/products',     label: 'Products',     icon: Package,      minRole: 'manager' },
       { to: '/bundles',      label: 'Bundles',      icon: PackageOpen,  minRole: 'manager' },
@@ -61,14 +74,12 @@ const allGroups: NavGroup[] = [
   },
   {
     label: 'Customers',
-    icon: Users,
     items: [
       { to: '/customers', label: 'Customers', icon: Users },
     ],
   },
   {
     label: 'Procurement',
-    icon: Truck,
     items: [
       { to: '/vendors',         label: 'Vendors',         icon: Building2, minRole: 'manager' },
       { to: '/purchase-orders', label: 'Purchase Orders', icon: Truck,     minRole: 'manager' },
@@ -76,7 +87,6 @@ const allGroups: NavGroup[] = [
   },
   {
     label: 'Team',
-    icon: Clock,
     items: [
       { to: '/time-clock', label: 'Time Clock', icon: Clock },
       { to: '/reports',    label: 'Reports',    icon: BarChart3, minRole: 'manager' },
@@ -86,12 +96,7 @@ const allGroups: NavGroup[] = [
 
 const roleLevel = { cashier: 0, manager: 1, admin: 2 } as const;
 
-const dropdownContent =
-  'z-50 min-w-[10rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md ' +
-  'data-[state=open]:animate-in data-[state=closed]:animate-out ' +
-  'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 ' +
-  'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 ' +
-  'data-[side=bottom]:slide-in-from-top-2';
+// ── EOD data ──────────────────────────────────────────────────────────────────
 
 const BILLS = [
   { label: '$100', value: 100 },
@@ -119,13 +124,183 @@ function calcCashFromDenoms(counts: DenomCounts): number {
   return Math.round(total * 100) / 100;
 }
 
+// ── Sidebar nav item ──────────────────────────────────────────────────────────
+
+function SideNavLink({ item, onClick }: { item: NavItem; onClick?: () => void }) {
+  const Icon = item.icon;
+  return (
+    <NavLink
+      to={item.to}
+      end={item.end}
+      onClick={onClick}
+      className={({ isActive }) =>
+        cn(
+          'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+          isActive
+            ? 'bg-amber-500 text-zinc-950'
+            : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100',
+        )
+      }
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {item.label}
+    </NavLink>
+  );
+}
+
+// ── Sidebar content (shared between desktop + mobile drawer) ──────────────────
+
+function SidebarContent({
+  visibleGroups,
+  onNav,
+  dark,
+  onThemeToggle,
+  user,
+  sessionId,
+  onOpenEod,
+  onLogout,
+}: {
+  visibleGroups: (NavGroup & { visibleItems: NavItem[] })[];
+  onNav?: () => void;
+  dark: boolean;
+  onThemeToggle: () => void;
+  user: { name?: string; role?: string } | null;
+  sessionId: string | null | undefined;
+  onOpenEod: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <div className="flex flex-col h-full bg-zinc-950 text-zinc-100">
+      {/* Logo */}
+      <div className="flex items-center gap-2.5 px-4 h-14 border-b border-zinc-800 shrink-0">
+        <div className="h-7 w-7 rounded-lg bg-amber-500 flex items-center justify-center">
+          <ShoppingBag className="h-4 w-4 text-zinc-950" />
+        </div>
+        <span className="font-semibold text-base tracking-tight">RetailOS</span>
+      </div>
+
+      {/* Nav links */}
+      <nav className="flex-1 overflow-y-auto sidebar-scroll px-3 py-3 space-y-0.5">
+        {/* Top-level: Dashboard + Terminal */}
+        <NavLink
+          to="/"
+          end
+          onClick={onNav}
+          className={({ isActive }) =>
+            cn(
+              'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+              isActive
+                ? 'bg-amber-500 text-zinc-950'
+                : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100',
+            )
+          }
+        >
+          <LayoutDashboard className="h-4 w-4 shrink-0" />
+          Dashboard
+        </NavLink>
+
+        <NavLink
+          to="/terminal"
+          onClick={onNav}
+          className={({ isActive }) =>
+            cn(
+              'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+              isActive
+                ? 'bg-amber-500 text-zinc-950'
+                : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100',
+            )
+          }
+        >
+          <ShoppingCart className="h-4 w-4 shrink-0" />
+          Terminal
+        </NavLink>
+
+        {/* Grouped sections */}
+        {visibleGroups.map((group) => (
+          <div key={group.label} className="pt-4">
+            <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
+              {group.label}
+            </p>
+            {group.visibleItems.map((item) => (
+              <SideNavLink key={item.to} item={item} onClick={onNav} />
+            ))}
+          </div>
+        ))}
+
+        {/* Settings */}
+        <div className="pt-4">
+          <NavLink
+            to="/settings"
+            onClick={onNav}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                isActive
+                  ? 'bg-amber-500 text-zinc-950'
+                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100',
+              )
+            }
+          >
+            <Settings className="h-4 w-4 shrink-0" />
+            Settings
+          </NavLink>
+        </div>
+      </nav>
+
+      {/* Footer */}
+      <div className="shrink-0 px-3 pb-3 space-y-1 border-t border-zinc-800 pt-3">
+        {/* Close Register */}
+        {sessionId && (
+          <button
+            onClick={onOpenEod}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium text-amber-400 hover:bg-zinc-800 transition-colors"
+          >
+            <DollarSign className="h-4 w-4 shrink-0" />
+            Close Register
+          </button>
+        )}
+
+        {/* Theme toggle */}
+        <button
+          onClick={onThemeToggle}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+        >
+          {dark ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
+          {dark ? 'Light mode' : 'Dark mode'}
+        </button>
+
+        {/* User */}
+        <div className="flex items-center gap-2.5 px-3 py-2">
+          <div className="h-7 w-7 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-semibold shrink-0 text-zinc-200">
+            {user?.name?.charAt(0).toUpperCase() ?? '?'}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-zinc-200 truncate">{user?.name}</p>
+            <p className="text-xs text-zinc-500 capitalize">{user?.role}</p>
+          </div>
+          <button
+            onClick={onLogout}
+            title="Sign out"
+            className="text-zinc-500 hover:text-zinc-200 transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main layout ───────────────────────────────────────────────────────────────
+
 export function DashboardLayout() {
   const queryClient = useQueryClient();
   const { user, logout } = useAuthStore();
   const { registerId, sessionId, setSession } = useTerminalStore();
   const navigate = useNavigate();
-  const location = useLocation();
+  const { dark, toggle: toggleTheme } = useTheme();
 
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [eodOpen, setEodOpen] = useState(false);
   const [denomCounts, setDenomCounts] = useState<DenomCounts>({});
   const [eodNotes, setEodNotes] = useState('');
@@ -155,6 +330,7 @@ export function DashboardLayout() {
     setDenomCounts({});
     setEodNotes('');
     setEodError('');
+    setDrawerOpen(false);
     setEodOpen(true);
   }
 
@@ -180,170 +356,63 @@ export function DashboardLayout() {
     navigate('/login');
   }
 
-  const navLink = ({ isActive }: { isActive: boolean }) =>
-    cn(
-      'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap',
-      isActive
-        ? 'bg-primary text-primary-foreground'
-        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-    );
-
-  const triggerBase = (active: boolean) =>
-    cn(
-      'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap',
-      active
-        ? 'bg-primary text-primary-foreground'
-        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-    );
-
-  const dropdownItem =
-    'flex items-center gap-2 px-3 py-2 rounded-sm text-sm cursor-pointer outline-none select-none ' +
-    'data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground';
+  const sidebarProps = {
+    visibleGroups,
+    dark,
+    onThemeToggle: toggleTheme,
+    user: user ?? null,
+    sessionId: sessionId ?? null,
+    onOpenEod: openEod,
+    onLogout: handleLogout,
+  };
 
   return (
-    <div className="flex flex-col h-screen">
-      {/* ── Top navigation bar ────────────────────────────────────────────────── */}
-      <header className="h-14 border-b bg-background flex items-center px-4 gap-1 shrink-0 z-40">
+    <div className="flex h-screen overflow-hidden">
 
-        {/* Logo */}
-        <div className="flex items-center gap-2 mr-3 shrink-0">
-          <ShoppingBag className="h-5 w-5 text-primary" />
-          <span className="font-semibold text-base">POS</span>
+      {/* ── Desktop sidebar ──────────────────────────────────────────────────── */}
+      <aside className="hidden md:flex w-52 shrink-0 flex-col border-r border-zinc-800">
+        <SidebarContent {...sidebarProps} />
+      </aside>
+
+      {/* ── Mobile: top bar + drawer ─────────────────────────────────────────── */}
+      <div className="md:hidden fixed top-0 left-0 right-0 h-12 bg-zinc-950 border-b border-zinc-800 flex items-center px-3 gap-3 z-40">
+        <button
+          onClick={() => setDrawerOpen(true)}
+          className="text-zinc-400 hover:text-zinc-100 transition-colors"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <div className="flex items-center gap-2">
+          <div className="h-6 w-6 rounded bg-amber-500 flex items-center justify-center">
+            <ShoppingBag className="h-3.5 w-3.5 text-zinc-950" />
+          </div>
+          <span className="font-semibold text-sm text-zinc-100">RetailOS</span>
         </div>
+      </div>
 
-        {/* Dashboard & Terminal — always visible */}
-        <NavLink to="/" end className={navLink}>
-          <LayoutDashboard className="h-4 w-4" />
-          Dashboard
-        </NavLink>
-
-        <NavLink to="/terminal" className={navLink}>
-          <ShoppingCart className="h-4 w-4" />
-          Terminal
-        </NavLink>
-
-        <div className="w-px h-5 bg-border mx-1 shrink-0" />
-
-        {/* Dynamic groups */}
-        {visibleGroups.map((group) => {
-          const GroupIcon = group.icon;
-          const isGroupActive = group.visibleItems.some((item) =>
-            item.end
-              ? location.pathname === item.to
-              : location.pathname.startsWith(item.to),
-          );
-
-          // Single visible item → render as a direct link (no dropdown)
-          if (group.visibleItems.length === 1) {
-            const item = group.visibleItems[0];
-            const ItemIcon = item.icon;
-            return (
-              <NavLink key={group.label} to={item.to} end={item.end} className={navLink}>
-                <ItemIcon className="h-4 w-4" />
-                {group.label}
-              </NavLink>
-            );
-          }
-
-          // Multiple items → dropdown
-          return (
-            <DropdownMenuPrimitive.Root key={group.label}>
-              <DropdownMenuPrimitive.Trigger className={triggerBase(isGroupActive)}>
-                <GroupIcon className="h-4 w-4" />
-                {group.label}
-                <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
-              </DropdownMenuPrimitive.Trigger>
-              <DropdownMenuPrimitive.Portal>
-                <DropdownMenuPrimitive.Content
-                  align="start"
-                  sideOffset={6}
-                  className={dropdownContent}
-                >
-                  {group.visibleItems.map((item) => {
-                    const ItemIcon = item.icon;
-                    const isItemActive = item.end
-                      ? location.pathname === item.to
-                      : location.pathname.startsWith(item.to);
-                    return (
-                      <DropdownMenuPrimitive.Item
-                        key={item.to}
-                        className={cn(
-                          dropdownItem,
-                          isItemActive && 'bg-primary text-primary-foreground',
-                        )}
-                        onSelect={() => navigate(item.to)}
-                      >
-                        <ItemIcon className="h-4 w-4" />
-                        {item.label}
-                      </DropdownMenuPrimitive.Item>
-                    );
-                  })}
-                </DropdownMenuPrimitive.Content>
-              </DropdownMenuPrimitive.Portal>
-            </DropdownMenuPrimitive.Root>
-          );
-        })}
-
-        {/* Push remaining items to the right */}
-        <div className="flex-1" />
-
-        {/* Close Register — only when a session is active */}
-        {sessionId && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5 text-muted-foreground border-dashed"
-            onClick={openEod}
-          >
-            <DollarSign className="h-3.5 w-3.5" />
-            Close Register
-          </Button>
-        )}
-
-        {/* Settings */}
-        <NavLink to="/settings" className={navLink}>
-          <Settings className="h-4 w-4" />
-          Settings
-        </NavLink>
-
-        {/* User menu */}
-        <DropdownMenuPrimitive.Root>
-          <DropdownMenuPrimitive.Trigger
-            className={cn(
-              'flex items-center gap-2 px-2 py-1.5 rounded-md text-sm font-medium transition-colors',
-              'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-            )}
-          >
-            <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-semibold shrink-0">
-              {user?.name?.charAt(0).toUpperCase() ?? '?'}
-            </div>
-            <span className="hidden md:inline max-w-[120px] truncate">{user?.name}</span>
-            <ChevronDown className="h-3 w-3 opacity-60 shrink-0" />
-          </DropdownMenuPrimitive.Trigger>
-          <DropdownMenuPrimitive.Portal>
-            <DropdownMenuPrimitive.Content
-              align="end"
-              sideOffset={6}
-              className={dropdownContent}
-            >
-              <div className="px-3 py-2 border-b mb-1">
-                <p className="text-sm font-medium truncate">{user?.name}</p>
-                <p className="text-xs text-muted-foreground capitalize">{user?.role}</p>
-              </div>
-              <DropdownMenuPrimitive.Item
-                className={cn(dropdownItem, 'text-destructive')}
-                onClick={handleLogout}
+      {/* Mobile drawer overlay */}
+      {drawerOpen && (
+        <>
+          <div
+            className="md:hidden fixed inset-0 bg-black/60 z-40"
+            onClick={() => setDrawerOpen(false)}
+          />
+          <div className="md:hidden fixed top-0 left-0 bottom-0 w-64 z-50 shadow-2xl">
+            <div className="absolute top-3 right-3 z-10">
+              <button
+                onClick={() => setDrawerOpen(false)}
+                className="text-zinc-400 hover:text-zinc-100 transition-colors"
               >
-                <LogOut className="h-4 w-4" />
-                Sign Out
-              </DropdownMenuPrimitive.Item>
-            </DropdownMenuPrimitive.Content>
-          </DropdownMenuPrimitive.Portal>
-        </DropdownMenuPrimitive.Root>
-      </header>
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <SidebarContent {...sidebarProps} onNav={() => setDrawerOpen(false)} />
+          </div>
+        </>
+      )}
 
-      {/* ── Page content ──────────────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-auto">
+      {/* ── Main content ─────────────────────────────────────────────────────── */}
+      <main className="flex-1 overflow-auto md:pt-0 pt-12">
         <Outlet />
       </main>
 
@@ -355,7 +424,6 @@ export function DashboardLayout() {
           </DialogHeader>
 
           <div className="space-y-5">
-            {/* Sales summary */}
             {summaryData && (
               <div className="border rounded-lg overflow-hidden text-sm">
                 <div className="bg-muted/50 px-3 py-2 font-medium text-xs uppercase tracking-wide text-muted-foreground">
@@ -390,7 +458,6 @@ export function DashboardLayout() {
               </div>
             )}
 
-            {/* Denomination count */}
             <div className="space-y-3">
               <p className="text-sm font-medium">Count Cash Drawer</p>
               <div className="grid grid-cols-2 gap-x-6 gap-y-2">
@@ -447,7 +514,6 @@ export function DashboardLayout() {
               </div>
             </div>
 
-            {/* Variance summary */}
             <div className="border rounded-lg overflow-hidden text-sm">
               <div className="divide-y">
                 <div className="flex justify-between px-3 py-2">
@@ -470,7 +536,6 @@ export function DashboardLayout() {
               </div>
             </div>
 
-            {/* Notes */}
             <div className="space-y-1.5">
               <Label htmlFor="eod-notes">Notes (optional)</Label>
               <Input
