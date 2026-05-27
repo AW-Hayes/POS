@@ -703,8 +703,9 @@ type UserForm = {
   password: string;
   pin: string;
   role: 'admin' | 'manager' | 'cashier';
+  commissionRate: string;
 };
-const blankUser: UserForm = { name: '', email: '', password: '', pin: '', role: 'cashier' };
+const blankUser: UserForm = { name: '', email: '', password: '', pin: '', role: 'cashier', commissionRate: '' };
 
 function UsersTab() {
   const queryClient = useQueryClient();
@@ -728,6 +729,13 @@ function UsersTab() {
             role: form.role,
             ...(form.password ? { password: form.password } : {}),
             ...(form.pin ? { pin: form.pin } : {}),
+          }).then(async (r) => {
+            if (form.commissionRate !== '') {
+              await api.put(`/commissions/users/${dialog.editing!.id}/rate`, {
+                commissionRate: form.commissionRate ? parseFloat(form.commissionRate) : null,
+              });
+            }
+            return r;
           })
         : api.post('/users', {
             name: form.name,
@@ -763,6 +771,9 @@ function UsersTab() {
       password: '',
       pin: '',
       role: u.role as UserForm['role'],
+      commissionRate: (u as User & { commissionRate?: number }).commissionRate != null
+        ? String((u as User & { commissionRate?: number }).commissionRate)
+        : '',
     });
     setError('');
     setDialog({ open: true, editing: u });
@@ -882,6 +893,18 @@ function UsersTab() {
                 onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value }))}
                 placeholder="4–6 digit PIN"
                 maxLength={6}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Commission Rate (%)</label>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                value={form.commissionRate}
+                onChange={(e) => setForm((f) => ({ ...f, commissionRate: e.target.value }))}
+                placeholder="e.g. 5 (leave blank for none)"
               />
             </div>
             {error && (

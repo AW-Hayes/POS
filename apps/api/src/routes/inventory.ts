@@ -311,3 +311,32 @@ inventoryRouter.put('/:locationId/:productId/reorder', requireRole('admin', 'man
     next(err);
   }
 });
+
+inventoryRouter.put('/:locationId/:productId/bin', requireRole('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { variantId, binLocation } = z
+      .object({
+        variantId: z.string().optional(),
+        binLocation: z.string().nullable(),
+      })
+      .parse(req.body);
+
+    const item = await prisma.inventoryItem.findFirst({
+      where: {
+        locationId: req.params.locationId,
+        productId: req.params.productId,
+        variantId: variantId ?? null,
+        location: { tenantId: req.user!.tenantId },
+      },
+    });
+    if (!item) throw new AppError(404, 'Inventory item not found');
+
+    const updated = await prisma.inventoryItem.update({
+      where: { id: item.id },
+      data: { binLocation },
+    });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    next(err);
+  }
+});

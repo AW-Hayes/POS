@@ -22,7 +22,8 @@ import { CashPayment } from './payments/CashPayment';
 import { CardPayment } from './payments/CardPayment';
 import { LoyaltyPayment } from './payments/LoyaltyPayment';
 import { HouseAccountPayment } from './payments/HouseAccountPayment';
-import { Banknote, CreditCard, Star, Building2 } from 'lucide-react';
+import { GiftCardPayment } from './payments/GiftCardPayment';
+import { Banknote, CreditCard, Star, Building2, Gift } from 'lucide-react';
 import { api } from '@/lib/api';
 
 /**
@@ -65,6 +66,7 @@ export function initCheckout(): void {
   // ── Default payment methods ───────────────────────────────────────────────
   paymentMethodRegistry.register({ id: 'cash',          label: 'Cash',          icon: Banknote,   component: CashPayment });
   paymentMethodRegistry.register({ id: 'card',          label: 'Card',          icon: CreditCard, component: CardPayment });
+  paymentMethodRegistry.register({ id: 'gift_card',     label: 'Gift Card',     icon: Gift,       component: GiftCardPayment });
   paymentMethodRegistry.register({ id: 'loyalty',       label: 'Loyalty Points', icon: Star,       component: LoyaltyPayment });
   paymentMethodRegistry.register({ id: 'house_account', label: 'House Account', icon: Building2,  component: HouseAccountPayment });
 

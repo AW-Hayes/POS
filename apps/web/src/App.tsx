@@ -18,6 +18,10 @@ import { GiftCardsPage } from '@/pages/GiftCardsPage';
 import { EstimatesPage } from '@/pages/EstimatesPage';
 import { LayawayPage } from '@/pages/LayawayPage';
 import { TimeClockPage } from '@/pages/TimeClockPage';
+import { ReturnsPage } from '@/pages/ReturnsPage';
+import { CycleCountPage } from '@/pages/CycleCountPage';
+import { ServiceTicketsPage } from '@/pages/ServiceTicketsPage';
+import { BundlesPage } from '@/pages/BundlesPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -42,6 +46,7 @@ export default function App() {
           <Route path="products" element={<ProductsPage />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="orders" element={<OrdersPage />} />
+          <Route path="returns" element={<ReturnsPage />} />
           <Route path="customers" element={<CustomersPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="vendors" element={<VendorsPage />} />
@@ -52,6 +57,9 @@ export default function App() {
           <Route path="estimates" element={<EstimatesPage />} />
           <Route path="layaway" element={<LayawayPage />} />
           <Route path="time-clock" element={<TimeClockPage />} />
+          <Route path="cycle-counts" element={<CycleCountPage />} />
+          <Route path="service-tickets" element={<ServiceTicketsPage />} />
+          <Route path="bundles" element={<BundlesPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
