@@ -269,7 +269,7 @@ inventoryRouter.get('/below-reorder', async (req, res, next) => {
       },
       include: {
         product: {
-          select: { id: true, name: true, sku: true, preferredVendorId: true, preferredVendor: { select: { id: true, name: true } } },
+          select: { id: true, name: true, sku: true, cost: true, preferredVendorId: true, preferredVendor: { select: { id: true, name: true } } },
         },
         variant: { select: { id: true, sku: true } },
       },

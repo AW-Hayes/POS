@@ -72,9 +72,18 @@ productsRouter.get('/', async (req, res, next) => {
   }
 });
 
+function generateSku(name: string): string {
+  const slug = name.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 12);
+  const suffix = Math.random().toString(36).toUpperCase().slice(2, 7);
+  return `${slug}-${suffix}`;
+}
+
 productsRouter.post('/', requireRole('admin', 'manager'), async (req, res, next) => {
   try {
     const data = productSchema.parse(req.body);
+    if (!data.sku) {
+      data.sku = generateSku(data.name);
+    }
     const product = await prisma.product.create({
       data: { ...data, tenantId: req.user!.tenantId },
       include: productInclude,
