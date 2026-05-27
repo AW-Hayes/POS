@@ -140,7 +140,9 @@ export function ProductsPage() {
                 <th className="text-left p-3 font-medium">Name</th>
                 <th className="text-left p-3 font-medium">SKU</th>
                 <th className="text-left p-3 font-medium">Category</th>
+                <th className="text-right p-3 font-medium">Cost</th>
                 <th className="text-right p-3 font-medium">Price</th>
+                <th className="text-right p-3 font-medium">GP%</th>
                 <th className="text-center p-3 font-medium">Variants</th>
                 <th className="text-center p-3 font-medium">Status</th>
                 <th className="p-3" />
@@ -163,7 +165,19 @@ export function ProductsPage() {
                       <span className="text-muted-foreground">—</span>
                     )}
                   </td>
+                  <td className="p-3 text-right text-muted-foreground">
+                    {product.cost != null ? formatCurrency(product.cost) : '—'}
+                  </td>
                   <td className="p-3 text-right font-medium">{formatCurrency(product.price)}</td>
+                  <td className="p-3 text-right">
+                    {product.cost != null && product.price > 0 ? (
+                      <span className={product.price > product.cost ? 'text-green-600 font-medium' : 'text-destructive font-medium'}>
+                        {(((product.price - product.cost) / product.price) * 100).toFixed(1)}%
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
                   <td className="p-3 text-center">
                     {product.variants.length > 0 ? (
                       <Badge variant="outline">{product.variants.length}</Badge>
@@ -202,7 +216,7 @@ export function ProductsPage() {
               ))}
               {products.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                  <td colSpan={9} className="p-8 text-center text-muted-foreground">
                     No products found
                   </td>
                 </tr>

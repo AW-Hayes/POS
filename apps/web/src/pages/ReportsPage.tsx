@@ -5,16 +5,27 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { BarChart3, TrendingUp, Package, CreditCard, Users, Printer, Clock } from 'lucide-react';
+import { BarChart3, TrendingUp, Package, CreditCard, Users, Printer, Clock, Percent } from 'lucide-react';
 
 interface SalesReport {
   orderCount: number;
   totalRevenue: number;
   totalTax: number;
   totalDiscount: number;
+  totalCost: number;
+  totalGP: number;
+  gpPercent: number | null;
   averageOrderValue: number;
   paymentBreakdown: Record<string, number>;
-  topProducts: Array<{ productId: string; name: string; quantitySold: number; revenue: number }>;
+  topProducts: Array<{
+    productId: string | null;
+    name: string;
+    quantitySold: number;
+    revenue: number;
+    costBasis: number | null;
+    gp: number | null;
+    gpPercent: number | null;
+  }>;
 }
 
 interface SalespersonRow {
@@ -133,6 +144,13 @@ export function ReportsPage() {
               <KpiCard icon={<CreditCard className="h-5 w-5 text-primary" />} label="Avg Order" value={formatCurrency(data.averageOrderValue)} />
               <KpiCard icon={<Package className="h-5 w-5 text-primary" />} label="Discounts" value={formatCurrency(data.totalDiscount)} />
             </div>
+            {data.gpPercent != null && (
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                <KpiCard icon={<Percent className="h-5 w-5 text-green-600" />} label="Gross Profit" value={formatCurrency(data.totalGP)} />
+                <KpiCard icon={<Percent className="h-5 w-5 text-green-600" />} label="GP %" value={`${data.gpPercent.toFixed(1)}%`} />
+                <KpiCard icon={<Package className="h-5 w-5 text-muted-foreground" />} label="Cost of Goods" value={formatCurrency(data.totalCost)} />
+              </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="border rounded-lg p-4 space-y-3">
@@ -156,7 +174,14 @@ export function ReportsPage() {
                       <p className="font-medium">{p.name}</p>
                       <p className="text-xs text-muted-foreground">{p.quantitySold} sold</p>
                     </div>
-                    <span className="font-medium">{formatCurrency(p.revenue)}</span>
+                    <div className="text-right">
+                      <p className="font-medium">{formatCurrency(p.revenue)}</p>
+                      {p.gpPercent != null && (
+                        <p className={`text-xs font-medium ${p.gpPercent >= 30 ? 'text-green-600' : p.gpPercent >= 0 ? 'text-amber-600' : 'text-destructive'}`}>
+                          {p.gpPercent.toFixed(1)}% GP
+                        </p>
+                      )}
+                    </div>
                   </div>
                 ))}
                 {data.topProducts.length === 0 && (
