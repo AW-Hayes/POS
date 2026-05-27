@@ -51,7 +51,7 @@ export function InventoryPage() {
   const [form, setForm] = useState<AdjustFormData>({ delta: '', type: 'adjustment', note: '' });
   const [formError, setFormError] = useState('');
   const [reorderItem, setReorderItem] = useState<InventoryWithProduct | null>(null);
-  const [reorderForm, setReorderForm] = useState({ reorderPoint: '', reorderQty: '' });
+  const [reorderForm, setReorderForm] = useState({ reorderPoint: '', reorderQty: '', binLocation: '' });
   const [reorderError, setReorderError] = useState('');
 
   // Receive stock dialog state
@@ -159,11 +159,18 @@ export function InventoryPage() {
     },
   });
 
+  const binMutation = useMutation({
+    mutationFn: ({ locationId, productId, variantId, binLocation }: { locationId: string; productId: string; variantId?: string; binLocation: string | null }) =>
+      api.put(`/inventory/${locationId}/${productId}/bin`, { variantId, binLocation }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+  });
+
   function openReorder(item: InventoryWithProduct) {
     setReorderItem(item);
     setReorderForm({
       reorderPoint: item.reorderPoint != null ? String(item.reorderPoint) : '',
       reorderQty: item.reorderQty != null ? String(item.reorderQty) : '',
+      binLocation: (item as InventoryWithProduct & { binLocation?: string }).binLocation ?? '',
     });
     setReorderError('');
   }
@@ -174,6 +181,14 @@ export function InventoryPage() {
       reorderPoint: reorderForm.reorderPoint ? Number(reorderForm.reorderPoint) : null,
       reorderQty: reorderForm.reorderQty ? Number(reorderForm.reorderQty) : null,
     });
+    if (reorderItem) {
+      binMutation.mutate({
+        locationId: reorderItem.locationId,
+        productId: reorderItem.productId,
+        variantId: reorderItem.variantId ?? undefined,
+        binLocation: reorderForm.binLocation.trim() || null,
+      });
+    }
   }
 
   function openAdjust(item: InventoryWithProduct) {
@@ -640,6 +655,15 @@ export function InventoryPage() {
                 value={reorderForm.reorderQty}
                 onChange={(e) => setReorderForm((f) => ({ ...f, reorderQty: e.target.value }))}
                 placeholder="e.g. 50 (suggested order qty)"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ro-bin">Bin Location</Label>
+              <Input
+                id="ro-bin"
+                value={reorderForm.binLocation}
+                onChange={(e) => setReorderForm((f) => ({ ...f, binLocation: e.target.value }))}
+                placeholder="e.g. A-12, Shelf 3B"
               />
             </div>
             {reorderError && <p className="text-sm text-destructive">{reorderError}</p>}

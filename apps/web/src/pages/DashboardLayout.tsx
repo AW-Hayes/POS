@@ -15,8 +15,8 @@ import { Input } from '@/components/ui/input';
 import {
   LayoutDashboard, ShoppingCart, Package, Warehouse, ClipboardList,
   Users, Settings, LogOut, ShoppingBag, BarChart3, Building2,
-  Truck, Tag, Layers, CreditCard, FileText, Archive, Clock,
-  DollarSign, Menu, X, Sun, Moon,
+  Truck, Tag, Layers, CreditCard, FileText, Archive, Clock, ChevronDown,
+  DollarSign, RotateCcw, ClipboardCheck, Wrench, PackageOpen, Menu, X, Sun, Moon,
 } from 'lucide-react';
 
 // ── Theme hook ────────────────────────────────────────────────────────────────
@@ -53,19 +53,23 @@ const allGroups: NavGroup[] = [
   {
     label: 'Sales',
     items: [
-      { to: '/orders',    label: 'Orders',    icon: ClipboardList },
-      { to: '/estimates', label: 'Estimates', icon: FileText },
-      { to: '/layaway',   label: 'Layaway',   icon: Archive },
+      { to: '/orders',          label: 'Orders',          icon: ClipboardList },
+      { to: '/returns',         label: 'Returns',         icon: RotateCcw },
+      { to: '/estimates',       label: 'Estimates',       icon: FileText },
+      { to: '/layaway',         label: 'Layaway',         icon: Archive },
+      { to: '/service-tickets', label: 'Service Tickets', icon: Wrench },
     ],
   },
   {
     label: 'Catalog',
     items: [
-      { to: '/products',     label: 'Products',     icon: Package,    minRole: 'manager' },
-      { to: '/inventory',    label: 'Inventory',    icon: Warehouse,  minRole: 'manager' },
-      { to: '/promotions',   label: 'Promotions',   icon: Tag,        minRole: 'manager' },
-      { to: '/price-levels', label: 'Price Levels', icon: Layers,     minRole: 'manager' },
-      { to: '/gift-cards',   label: 'Gift Cards',   icon: CreditCard, minRole: 'manager' },
+      { to: '/products',     label: 'Products',     icon: Package,      minRole: 'manager' },
+      { to: '/bundles',      label: 'Bundles',      icon: PackageOpen,  minRole: 'manager' },
+      { to: '/inventory',    label: 'Inventory',    icon: Warehouse,    minRole: 'manager' },
+      { to: '/cycle-counts', label: 'Cycle Counts', icon: ClipboardCheck, minRole: 'manager' },
+      { to: '/promotions',   label: 'Promotions',   icon: Tag,          minRole: 'manager' },
+      { to: '/price-levels', label: 'Price Levels', icon: Layers,       minRole: 'manager' },
+      { to: '/gift-cards',   label: 'Gift Cards',   icon: CreditCard,   minRole: 'manager' },
     ],
   },
   {

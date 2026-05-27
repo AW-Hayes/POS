@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { BarChart3, TrendingUp, Package, CreditCard, Users, Printer, Clock, Percent } from 'lucide-react';
+import { BarChart3, TrendingUp, Package, CreditCard, Users, Printer, Clock, Percent, DollarSign } from 'lucide-react';
 
 interface SalesReport {
   orderCount: number;
@@ -51,7 +51,15 @@ interface ZTapeData extends Omit<XTapeData, 'type'> {
   session: { id: string; closedAt: string | null };
 }
 
-type ReportTab = 'sales' | 'salesperson' | 'x-tape' | 'z-tape';
+interface CommissionRow {
+  salesperson: { id: string; name: string };
+  commissionRate: number | null;
+  orderCount: number;
+  totalRevenue: number;
+  commission: number;
+}
+
+type ReportTab = 'sales' | 'salesperson' | 'commissions' | 'x-tape' | 'z-tape';
 
 export function ReportsPage() {
   const today = new Date().toISOString().slice(0, 10);
@@ -82,6 +90,15 @@ export function ReportsPage() {
         .then((r) => r.data.data as SalespersonRow[]),
   });
 
+  const commissionsQuery = useQuery({
+    queryKey: ['commissions-report', query],
+    enabled: tab === 'commissions',
+    queryFn: () =>
+      api
+        .get('/commissions/report', { params: { from: `${query.from}T00:00:00.000Z`, to: `${query.to}T23:59:59.999Z` } })
+        .then((r) => r.data.data as CommissionRow[]),
+  });
+
   const xMutation = useMutation({
     mutationFn: () =>
       api.get('/reports/x-tape', {
@@ -106,10 +123,11 @@ export function ReportsPage() {
     <div className="p-6 space-y-6">
       <h1 className="text-2xl font-bold">Reports</h1>
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
         {([
           { id: 'sales', label: 'Sales', icon: TrendingUp },
           { id: 'salesperson', label: 'Salesperson', icon: Users },
+          { id: 'commissions', label: 'Commissions', icon: DollarSign },
           { id: 'x-tape', label: 'X-Tape', icon: Clock },
           { id: 'z-tape', label: 'Z-Tape', icon: Printer },
         ] as const).map(({ id, label, icon: Icon }) => (
@@ -234,6 +252,49 @@ export function ReportsPage() {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Commissions tab */}
+      {tab === 'commissions' && (
+        commissionsQuery.isLoading ? <p className="text-muted-foreground">Loading…</p> :
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">Commission totals for salespersons with a rate set. Set rates in Settings → Users.</p>
+          <div className="border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="text-left p-3 font-medium">Salesperson</th>
+                  <th className="text-right p-3 font-medium">Rate</th>
+                  <th className="text-right p-3 font-medium">Orders</th>
+                  <th className="text-right p-3 font-medium">Revenue</th>
+                  <th className="text-right p-3 font-medium">Commission</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {(commissionsQuery.data ?? []).map((row) => (
+                  <tr key={row.salesperson.id}>
+                    <td className="p-3 font-medium">{row.salesperson.name}</td>
+                    <td className="p-3 text-right text-muted-foreground">{row.commissionRate != null ? `${row.commissionRate}%` : '—'}</td>
+                    <td className="p-3 text-right">{row.orderCount}</td>
+                    <td className="p-3 text-right">{formatCurrency(row.totalRevenue)}</td>
+                    <td className="p-3 text-right font-semibold text-green-700">{formatCurrency(row.commission)}</td>
+                  </tr>
+                ))}
+                {(commissionsQuery.data ?? []).length === 0 && (
+                  <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No salespersons with commission rates</td></tr>
+                )}
+                {(commissionsQuery.data ?? []).length > 0 && (
+                  <tr className="bg-muted/30 font-semibold">
+                    <td colSpan={4} className="p-3 text-right">Total Commission</td>
+                    <td className="p-3 text-right text-green-700">
+                      {formatCurrency((commissionsQuery.data ?? []).reduce((s, r) => s + r.commission, 0))}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

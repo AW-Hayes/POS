@@ -33,6 +33,10 @@ import { priceBreaksRouter } from './routes/price-breaks';
 import { serialNumbersRouter } from './routes/serial-numbers';
 import { labelsRouter } from './routes/labels';
 import { timeClockRouter } from './routes/time-clock';
+import { cycleCountsRouter } from './routes/cycle-counts';
+import { serviceTicketsRouter } from './routes/service-tickets';
+import { bundlesRouter } from './routes/bundles';
+import { commissionsRouter } from './routes/commissions';
 import { errorHandler } from './middleware/errorHandler';
 import { registerBuiltinHooks } from './hooks';
 
@@ -81,5 +85,9 @@ app.use('/api/price-breaks', priceBreaksRouter);
 app.use('/api/serial-numbers', serialNumbersRouter);
 app.use('/api/labels', labelsRouter);
 app.use('/api/time-clock', timeClockRouter);
+app.use('/api/cycle-counts', cycleCountsRouter);
+app.use('/api/service-tickets', serviceTicketsRouter);
+app.use('/api/bundles', bundlesRouter);
+app.use('/api/commissions', commissionsRouter);
 
 app.use(errorHandler);

@@ -89,6 +89,7 @@ model User {
   passwordHash String?
   pin          String?
   role         String   @default("cashier")
+  commissionRate Float?
   active       Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -172,6 +173,8 @@ model Product {
   preferredVendor    Vendor?              @relation("PreferredVendor", fields: [preferredVendorId], references: [id])
   serialNumbers      SerialNumber[]
   priceBreaks        PriceBreak[]
+  bundleComponents   BundleComponent[]    @relation("BundleProduct")
+  appearsInBundles   BundleComponent[]    @relation("ComponentProduct")
 
   @@unique([tenantId, sku])
   @@unique([tenantId, barcode])
@@ -234,6 +237,7 @@ model InventoryItem {
   lowStockAt   Float?
   reorderPoint Float?
   reorderQty   Float?
+  binLocation  String?
   updatedAt    DateTime @updatedAt
 
   location    Location              @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -627,6 +631,94 @@ model SerialNumber {
 
   @@unique([productId, serial])
   @@index([productId])
+}
+
+// ─── Cycle Counts ────────────────────────────────────────────────────────────
+
+model CycleCount {
+  id         String    @id @default(cuid())
+  tenantId   String
+  locationId String
+  name       String
+  status     String    @default("open") // "open" | "closed"
+  startedAt  DateTime  @default(now())
+  closedAt   DateTime?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  items CycleCountItem[]
+
+  @@index([tenantId])
+  @@index([locationId])
+}
+
+model CycleCountItem {
+  id           String    @id @default(cuid())
+  cycleCountId String
+  productId    String
+  variantId    String?
+  expectedQty  Float
+  countedQty   Float?
+  countedAt    DateTime?
+  note         String?
+
+  cycleCount CycleCount @relation(fields: [cycleCountId], references: [id], onDelete: Cascade)
+
+  @@unique([cycleCountId, productId, variantId])
+}
+
+// ─── Service Tickets ─────────────────────────────────────────────────────────
+
+model ServiceTicket {
+  id          String    @id @default(cuid())
+  tenantId    String
+  locationId  String
+  customerId  String?
+  ticketNumber String?
+  status      String    @default("open") // "open" | "in_progress" | "ready" | "completed" | "cancelled"
+  description String?
+  techNotes   String?
+  estimatedCost Float?
+  finalCost   Float?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  items ServiceTicketItem[]
+
+  @@index([tenantId])
+  @@index([locationId])
+}
+
+model ServiceTicketItem {
+  id              String  @id @default(cuid())
+  serviceTicketId String
+  type            String  // "labor" | "part"
+  name            String
+  productId       String?
+  variantId       String?
+  quantity        Float   @default(1)
+  unitPrice       Float
+  total           Float
+
+  serviceTicket ServiceTicket @relation(fields: [serviceTicketId], references: [id], onDelete: Cascade)
+}
+
+// ─── Product Bundles ──────────────────────────────────────────────────────────
+
+model BundleComponent {
+  id               String  @id @default(cuid())
+  bundleProductId  String
+  componentProductId String
+  componentVariantId String?
+  quantity         Float   @default(1)
+
+  bundleProduct    Product @relation("BundleProduct",    fields: [bundleProductId],    references: [id], onDelete: Cascade)
+  componentProduct Product @relation("ComponentProduct", fields: [componentProductId], references: [id])
+
+  @@unique([bundleProductId, componentProductId, componentVariantId])
+  @@index([bundleProductId])
 }
 
 // ─── Time Clock ───────────────────────────────────────────────────────────────
