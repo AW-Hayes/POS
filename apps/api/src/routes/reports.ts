@@ -70,16 +70,33 @@ reportsRouter.get('/sales', async (req, res, next) => {
     const productIds = itemAgg.map((i) => i.productId).filter(Boolean) as string[];
     const products = await prisma.product.findMany({
       where: { id: { in: productIds } },
-      select: { id: true, name: true },
+      select: { id: true, name: true, cost: true },
     });
-    const productMap = new Map(products.map((p) => [p.id, p.name]));
+    const productMap = new Map(products.map((p) => [p.id, p]));
 
-    const topProducts = itemAgg.map((i) => ({
-      productId: i.productId,
-      name: i.productId ? (productMap.get(i.productId) ?? 'Unknown') : 'Custom',
-      quantitySold: i._sum.quantity ?? 0,
-      revenue: i._sum.total ?? 0,
-    }));
+    let totalCost = 0;
+    const topProducts = itemAgg.map((i) => {
+      const product = i.productId ? productMap.get(i.productId) : undefined;
+      const qty = i._sum.quantity ?? 0;
+      const revenue = i._sum.total ?? 0;
+      const unitCost = product?.cost ?? null;
+      const costBasis = unitCost != null ? unitCost * qty : null;
+      if (costBasis != null) totalCost += costBasis;
+      const gp = costBasis != null ? revenue - costBasis : null;
+      const gpPercent = gp != null && revenue > 0 ? (gp / revenue) * 100 : null;
+      return {
+        productId: i.productId,
+        name: product?.name ?? (i.productId ? 'Unknown' : 'Custom'),
+        quantitySold: qty,
+        revenue,
+        costBasis,
+        gp,
+        gpPercent,
+      };
+    });
+
+    const totalGP = totalRevenue - totalCost;
+    const gpPercent = totalRevenue > 0 ? (totalGP / totalRevenue) * 100 : null;
 
     res.json({
       success: true,
@@ -88,6 +105,9 @@ reportsRouter.get('/sales', async (req, res, next) => {
         totalRevenue,
         totalTax,
         totalDiscount,
+        totalCost,
+        totalGP,
+        gpPercent,
         averageOrderValue: orders.length ? totalRevenue / orders.length : 0,
         paymentBreakdown,
         topProducts,

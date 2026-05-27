@@ -8,6 +8,7 @@ export interface CartItem {
   name: string;
   sku?: string;
   price: number;
+  cost?: number;
   quantity: number;
   discount: number;
   requiresAgeVerification?: boolean;

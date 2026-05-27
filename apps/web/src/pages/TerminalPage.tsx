@@ -46,6 +46,8 @@ export function TerminalPage() {
   const [cashDropOpen, setCashDropOpen] = useState(false);
   const [cashDropAmount, setCashDropAmount] = useState('');
   const [cashDropNote, setCashDropNote] = useState('');
+  const [editingPriceIdx, setEditingPriceIdx] = useState<number | null>(null);
+  const [priceInput, setPriceInput] = useState('');
   const barcodeBuffer = useRef('');
   const barcodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -78,9 +80,53 @@ export function TerminalPage() {
 
   // ── Cart helpers ──────────────────────────────────────────────────────────────
 
+  // ── GP% helpers ───────────────────────────────────────────────────────────────
+
+  // Parses a price input: plain number, G25/G25% (GP margin), or M50/M50% (markup).
+  function parsePrice(input: string, cost?: number): number | null {
+    const clean = input.trim().toUpperCase();
+    const gMatch = clean.match(/^G(\d+(?:\.\d+)?)%?$/);
+    if (gMatch) {
+      if (cost == null) return null;
+      const gp = parseFloat(gMatch[1]) / 100;
+      if (gp <= 0 || gp >= 1) return null;
+      return Math.round((cost / (1 - gp)) * 100) / 100;
+    }
+    const mMatch = clean.match(/^M(\d+(?:\.\d+)?)%?$/);
+    if (mMatch) {
+      if (cost == null) return null;
+      const markup = parseFloat(mMatch[1]) / 100;
+      if (markup < 0) return null;
+      return Math.round(cost * (1 + markup) * 100) / 100;
+    }
+    const n = parseFloat(input);
+    return isNaN(n) || n < 0 ? null : Math.round(n * 100) / 100;
+  }
+
+  function commitPriceEdit(index: number) {
+    if (editingPriceIdx !== index) return;
+    const item = cart[index];
+    const newPrice = parsePrice(priceInput, item.cost);
+    if (newPrice !== null) {
+      setCart((prev) => prev.map((it, i) => (i === index ? { ...it, price: newPrice } : it)));
+    }
+    setEditingPriceIdx(null);
+    setPriceInput('');
+  }
+
+  function applyPreset(index: number, gpPct: number) {
+    const item = cart[index];
+    if (item.cost == null) return;
+    const newPrice = Math.round((item.cost / (1 - gpPct / 100)) * 100) / 100;
+    setCart((prev) => prev.map((it, i) => (i === index ? { ...it, price: newPrice } : it)));
+    setEditingPriceIdx(null);
+    setPriceInput('');
+  }
+
   const addToCart = useCallback((product: Product, variantId?: string) => {
     const variant = variantId ? product.variants.find((v) => v.id === variantId) : undefined;
     const price = variant?.price ?? product.price;
+    const cost = (variant as { cost?: number } | undefined)?.cost ?? (product as { cost?: number }).cost ?? undefined;
     const name = product.name + (variant ? ` (${variant.attributeValues.map((v) => v.value).join(' / ')})` : '');
 
     setCart((prev) => {
@@ -101,6 +147,7 @@ export function TerminalPage() {
           name,
           sku: variant?.sku ?? product.sku ?? undefined,
           price,
+          cost,
           quantity: 1,
           discount: 0,
           requiresAgeVerification: product.requiresAgeVerification,
@@ -123,6 +170,12 @@ export function TerminalPage() {
   }
 
   const subtotal = cart.reduce((s, i) => s + (i.price - i.discount) * i.quantity, 0);
+
+  const hasCostData = cart.some((i) => i.cost != null);
+  const costBasisTotal = cart.reduce((s, i) => s + (i.cost != null ? i.cost * i.quantity : 0), 0);
+  const revBasisTotal = cart.reduce((s, i) => s + (i.cost != null ? (i.price - i.discount) * i.quantity : 0), 0);
+  const cartGP = revBasisTotal - costBasisTotal;
+  const cartGPPct = revBasisTotal > 0 ? (cartGP / revBasisTotal) * 100 : 0;
 
   function handleOrderComplete() {
     setCart([]);
@@ -452,34 +505,106 @@ export function TerminalPage() {
           {cart.length === 0 && (
             <p className="text-center text-muted-foreground text-sm py-8">Cart is empty</p>
           )}
-          {cart.map((item, i) => (
-            <div key={i} className="bg-background rounded-md p-2 flex items-center gap-2">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{item.name}</p>
-                <p className="text-xs text-muted-foreground">{formatCurrency(item.price)} each</p>
+          {cart.map((item, i) => {
+            const gp = item.cost != null && item.price > 0
+              ? ((item.price - item.cost) / item.price) * 100
+              : null;
+            const belowCost = item.cost != null && item.price < item.cost;
+            const isEditingPrice = editingPriceIdx === i;
+
+            return (
+              <div
+                key={i}
+                className={cn(
+                  'bg-background rounded-md p-2 flex items-center gap-2',
+                  belowCost && 'border border-destructive/50 bg-destructive/5',
+                )}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{item.name}</p>
+                  {isEditingPrice ? (
+                    <div className="mt-1 space-y-1">
+                      <div className="flex items-center gap-1">
+                        <input
+                          className="text-xs border rounded px-1.5 py-0.5 w-24 focus:outline-none focus:ring-1 focus:ring-primary bg-background"
+                          autoFocus
+                          value={priceInput}
+                          onChange={(e) => setPriceInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitPriceEdit(i);
+                            if (e.key === 'Escape') { setEditingPriceIdx(null); setPriceInput(''); }
+                          }}
+                          onBlur={() => commitPriceEdit(i)}
+                          placeholder="price or G30%"
+                        />
+                        <span className="text-[10px] text-muted-foreground">each</span>
+                      </div>
+                      {item.cost != null && (
+                        <div className="flex gap-1">
+                          {[25, 30, 40, 50].map((pct) => (
+                            <button
+                              key={pct}
+                              className="text-[10px] px-1.5 py-0.5 rounded bg-muted hover:bg-primary hover:text-primary-foreground font-medium transition-colors"
+                              onMouseDown={(e) => { e.preventDefault(); applyPreset(i, pct); }}
+                            >
+                              G{pct}%
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <button
+                        className={cn(
+                          'text-xs underline-offset-2 hover:underline transition-colors',
+                          belowCost ? 'text-destructive font-medium' : 'text-muted-foreground hover:text-foreground',
+                        )}
+                        onClick={() => { setEditingPriceIdx(i); setPriceInput(String(item.price)); }}
+                        title="Click to edit price"
+                      >
+                        {formatCurrency(item.price)} each
+                      </button>
+                      {gp !== null && (
+                        <span
+                          className={cn(
+                            'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                            belowCost
+                              ? 'bg-destructive/15 text-destructive'
+                              : gp >= 30
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+                          )}
+                        >
+                          {gp.toFixed(1)}% GP
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button size="icon" variant="outline" className="h-6 w-6" onClick={() => updateQty(i, -1)}>
+                    <Minus className="h-3 w-3" />
+                  </Button>
+                  <span className="w-5 text-center text-sm font-medium">{item.quantity}</span>
+                  <Button size="icon" variant="outline" className="h-6 w-6" onClick={() => updateQty(i, 1)}>
+                    <Plus className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6 text-destructive"
+                    onClick={() => setCart((prev) => prev.filter((_, idx) => idx !== i))}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+                <span className="text-sm font-semibold w-16 text-right tabular-nums">
+                  {formatCurrency((item.price - item.discount) * item.quantity)}
+                </span>
               </div>
-              <div className="flex items-center gap-1">
-                <Button size="icon" variant="outline" className="h-6 w-6" onClick={() => updateQty(i, -1)}>
-                  <Minus className="h-3 w-3" />
-                </Button>
-                <span className="w-5 text-center text-sm font-medium">{item.quantity}</span>
-                <Button size="icon" variant="outline" className="h-6 w-6" onClick={() => updateQty(i, 1)}>
-                  <Plus className="h-3 w-3" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-6 w-6 text-destructive"
-                  onClick={() => setCart((prev) => prev.filter((_, idx) => idx !== i))}
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
-              <span className="text-sm font-semibold w-16 text-right tabular-nums">
-                {formatCurrency((item.price - item.discount) * item.quantity)}
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Totals + actions */}
@@ -488,6 +613,20 @@ export function TerminalPage() {
             <span className="text-muted-foreground">Subtotal</span>
             <span className="font-medium tabular-nums">{formatCurrency(subtotal)}</span>
           </div>
+          {hasCostData && cart.length > 0 && (
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Gross Profit</span>
+              <span
+                className={cn(
+                  'font-medium tabular-nums',
+                  cartGP < 0 ? 'text-destructive' : cartGP > 0 ? 'text-green-600' : '',
+                )}
+              >
+                {formatCurrency(cartGP)}{' '}
+                <span className="text-xs opacity-75">({cartGPPct.toFixed(1)}%)</span>
+              </span>
+            </div>
+          )}
           <Button
             className="w-full"
             size={isTouch ? 'lg' : 'default'}
