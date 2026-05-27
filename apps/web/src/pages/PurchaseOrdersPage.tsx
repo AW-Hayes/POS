@@ -361,10 +361,10 @@ export function PurchaseOrdersPage() {
               </div>
               <div className="space-y-1.5">
                 <Label>Vendor</Label>
-                <Select value={createVendorId} onValueChange={setCreateVendorId}>
+                <Select value={createVendorId || '__none__'} onValueChange={(v) => setCreateVendorId(v === '__none__' ? '' : v)}>
                   <SelectTrigger><SelectValue placeholder="No vendor" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No vendor</SelectItem>
+                    <SelectItem value="__none__">No vendor</SelectItem>
                     {vendors.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -423,14 +423,14 @@ export function PurchaseOrdersPage() {
                           <td className="p-2">
                             {li.variants.length > 0 ? (
                               <Select
-                                value={li.variantId}
-                                onValueChange={(v) => updateLine(i, { variantId: v })}
+                                value={li.variantId || '__base__'}
+                                onValueChange={(v) => updateLine(i, { variantId: v === '__base__' ? '' : v })}
                               >
                                 <SelectTrigger className="h-7 text-xs w-32">
                                   <SelectValue placeholder="Base" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="">Base product</SelectItem>
+                                  <SelectItem value="__base__">Base product</SelectItem>
                                   {li.variants.map((v) => (
                                     <SelectItem key={v.id} value={v.id}>
                                       {v.attributeValues.map((av) => av.value).join(' / ')}
