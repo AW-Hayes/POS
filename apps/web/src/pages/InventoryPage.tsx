@@ -9,7 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
 } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Search, AlertTriangle, SlidersHorizontal, PackagePlus } from 'lucide-react';
+import { Search, AlertTriangle, SlidersHorizontal, PackagePlus, ArrowLeftRight } from 'lucide-react';
 import type { InventoryWithProduct } from '@pos/types';
 
 const ADJUSTMENT_TYPES = [
@@ -34,6 +34,15 @@ interface ReceiveFormData {
   note: string;
 }
 
+interface TransferFormData {
+  fromLocationId: string;
+  toLocationId: string;
+  productId: string;
+  variantId: string;
+  quantity: string;
+  note: string;
+}
+
 export function InventoryPage() {
   const queryClient = useQueryClient();
   const [showLowStock, setShowLowStock] = useState(false);
@@ -44,6 +53,14 @@ export function InventoryPage() {
 
   // Receive stock dialog state
   const [showReceive, setShowReceive] = useState(false);
+
+  // Transfer dialog state
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [transferSearch, setTransferSearch] = useState('');
+  const [transferForm, setTransferForm] = useState<TransferFormData>({
+    fromLocationId: '', toLocationId: '', productId: '', variantId: '', quantity: '', note: '',
+  });
+  const [transferError, setTransferError] = useState('');
   const [receiveSearch, setReceiveSearch] = useState('');
   const [receiveForm, setReceiveForm] = useState<ReceiveFormData>({
     locationId: '', productId: '', variantId: '', quantity: '', note: '',
@@ -72,6 +89,14 @@ export function InventoryPage() {
       api.get('/products', { params: { q: receiveSearch || undefined, pageSize: 20 } }).then((r) => r.data.data),
     enabled: showReceive,
   });
+
+  const { data: transferProductData } = useQuery({
+    queryKey: ['products-search', transferSearch],
+    queryFn: () =>
+      api.get('/products', { params: { q: transferSearch || undefined, pageSize: 20 } }).then((r) => r.data.data),
+    enabled: showTransfer,
+  });
+  const transferProductResults: typeof productResults = transferProductData ?? [];
   const productResults: { id: string; name: string; sku?: string; variants: { id: string; sku?: string; attributeValues: { value: string }[] }[] }[] =
     productSearchData ?? [];
 
@@ -99,6 +124,20 @@ export function InventoryPage() {
     },
     onError: (err: unknown) => {
       setReceiveError(err instanceof Error ? err.message : 'Failed to record stock');
+    },
+  });
+
+  const transferMutation = useMutation({
+    mutationFn: (payload: object) => api.post('/inventory/transfer', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      setShowTransfer(false);
+      setTransferSearch('');
+      setTransferForm({ fromLocationId: '', toLocationId: '', productId: '', variantId: '', quantity: '', note: '' });
+      setTransferError('');
+    },
+    onError: (err: unknown) => {
+      setTransferError(err instanceof Error ? err.message : 'Transfer failed');
     },
   });
 
@@ -143,6 +182,24 @@ export function InventoryPage() {
     });
   }
 
+  function handleTransferSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setTransferError('');
+    if (!transferForm.fromLocationId) return setTransferError('Select a source location');
+    if (!transferForm.toLocationId) return setTransferError('Select a destination location');
+    if (transferForm.fromLocationId === transferForm.toLocationId) return setTransferError('Source and destination must differ');
+    if (!transferForm.productId) return setTransferError('Select a product');
+    const qty = parseInt(transferForm.quantity, 10);
+    if (isNaN(qty) || qty <= 0) return setTransferError('Enter a positive quantity');
+
+    transferMutation.mutate({
+      fromLocationId: transferForm.fromLocationId,
+      toLocationId: transferForm.toLocationId,
+      items: [{ productId: transferForm.productId, variantId: transferForm.variantId || undefined, quantity: qty }],
+      note: transferForm.note.trim() || undefined,
+    });
+  }
+
   const variantLabel = (item: InventoryWithProduct) =>
     item.variant?.attributeValues.map((v) => v.value).join(' / ') ?? null;
 
@@ -158,6 +215,14 @@ export function InventoryPage() {
           >
             <PackagePlus className="h-4 w-4 mr-1" />
             Receive Stock
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { setShowTransfer(true); setTransferSearch(''); }}
+          >
+            <ArrowLeftRight className="h-4 w-4 mr-1" />
+            Transfer
           </Button>
           <Button
             variant={showLowStock ? 'destructive' : 'outline'}
@@ -354,6 +419,135 @@ export function InventoryPage() {
               </DialogClose>
               <Button type="submit" disabled={receiveMutation.isPending}>
                 {receiveMutation.isPending ? 'Saving…' : 'Record Stock'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer Stock dialog */}
+      <Dialog open={showTransfer} onOpenChange={(open) => { if (!open) { setShowTransfer(false); setTransferError(''); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Transfer Stock</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleTransferSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>From *</Label>
+                <Select
+                  value={transferForm.fromLocationId}
+                  onValueChange={(v) => setTransferForm((f) => ({ ...f, fromLocationId: v }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Source…" /></SelectTrigger>
+                  <SelectContent>
+                    {locations.map((loc) => (
+                      <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>To *</Label>
+                <Select
+                  value={transferForm.toLocationId}
+                  onValueChange={(v) => setTransferForm((f) => ({ ...f, toLocationId: v }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Destination…" /></SelectTrigger>
+                  <SelectContent>
+                    {locations.map((loc) => (
+                      <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Product *</Label>
+              <Input
+                placeholder="Search by name or SKU…"
+                value={transferSearch}
+                onChange={(e) => {
+                  setTransferSearch(e.target.value);
+                  setTransferForm((f) => ({ ...f, productId: '', variantId: '' }));
+                }}
+              />
+              {transferProductResults.length > 0 && !transferForm.productId && (
+                <div className="border rounded-md max-h-40 overflow-y-auto divide-y text-sm">
+                  {transferProductResults.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors"
+                      onClick={() => {
+                        setTransferForm((f) => ({ ...f, productId: p.id, variantId: '' }));
+                        setTransferSearch(p.name);
+                      }}
+                    >
+                      <span className="font-medium">{p.name}</span>
+                      {p.sku && <span className="text-muted-foreground ml-2">{p.sku}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {(() => {
+              const sel = transferProductResults.find((p) => p.id === transferForm.productId);
+              return sel && sel.variants.length > 0 ? (
+                <div className="space-y-1.5">
+                  <Label>Variant</Label>
+                  <Select
+                    value={transferForm.variantId}
+                    onValueChange={(v) => setTransferForm((f) => ({ ...f, variantId: v }))}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Base product" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">Base product</SelectItem>
+                      {sel.variants.map((v) => (
+                        <SelectItem key={v.id} value={v.id}>
+                          {v.attributeValues.map((av) => av.value).join(' / ')}
+                          {v.sku && ` — ${v.sku}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null;
+            })()}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="xfer-qty">Quantity *</Label>
+              <Input
+                id="xfer-qty"
+                type="number"
+                min={1}
+                step={1}
+                value={transferForm.quantity}
+                onChange={(e) => setTransferForm((f) => ({ ...f, quantity: e.target.value }))}
+                placeholder="e.g. 10"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="xfer-note">Note</Label>
+              <Input
+                id="xfer-note"
+                value={transferForm.note}
+                onChange={(e) => setTransferForm((f) => ({ ...f, note: e.target.value }))}
+                placeholder="e.g. Seasonal restock"
+              />
+            </div>
+
+            {transferError && <p className="text-sm text-destructive">{transferError}</p>}
+
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button type="button" variant="outline">Cancel</Button>
+              </DialogClose>
+              <Button type="submit" disabled={transferMutation.isPending}>
+                {transferMutation.isPending ? 'Transferring…' : 'Transfer'}
               </Button>
             </DialogFooter>
           </form>
