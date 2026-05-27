@@ -56,6 +56,7 @@ export function CheckoutModal({
         sessionId: hooked.sessionId,
         customerId: hooked.customerId,
         notes: hooked.meta.notes as string | undefined,
+        promotionIds: (hooked.meta.promotionIds as string[] | undefined) ?? [],
         items: hooked.cart.map((item) => ({
           productId: item.productId,
           variantId: item.variantId,

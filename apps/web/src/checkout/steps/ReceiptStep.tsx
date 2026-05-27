@@ -1,9 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { CheckCircle, Printer } from 'lucide-react';
+import { CheckCircle, Printer, Mail, Check } from 'lucide-react';
 import type { StepProps } from '../types';
 import type { Order } from '@pos/types';
 
@@ -14,9 +16,20 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
     enabled: !!state.orderId,
   });
 
+  const [emailInput, setEmailInput] = useState('');
+  const [emailSent, setEmailSent] = useState(false);
+
+  const emailMutation = useMutation({
+    mutationFn: (email: string) =>
+      api.post(`/receipts/orders/${state.orderId}/email`, { email: email || undefined }),
+    onSuccess: () => setEmailSent(true),
+  });
+
   const subtotal = state.cart.reduce((s, i) => s + (i.price - i.discount) * i.quantity, 0);
   const totalPaid = state.payments.reduce((s, p) => s + p.amount, 0);
   const change = Math.max(0, totalPaid - (order?.total ?? subtotal));
+
+  const customerEmail = (order?.customer as { email?: string | null } | undefined)?.email ?? undefined;
 
   function handlePrint() {
     window.print();
@@ -94,6 +107,44 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
         <p className="text-xs text-center text-muted-foreground">
           {formatDate(order.completedAt)}
         </p>
+      )}
+
+      {/* Email receipt */}
+      {state.orderId && (
+        <div className="border rounded-md p-3 space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">Email receipt</p>
+          {emailSent ? (
+            <div className="flex items-center gap-2 text-sm text-green-600">
+              <Check className="h-4 w-4" />
+              Sent to {emailMutation.variables}
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Input
+                type="email"
+                className="h-8 text-sm"
+                placeholder={customerEmail ?? 'customer@example.com'}
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0 gap-1.5"
+                disabled={emailMutation.isPending || (!emailInput && !customerEmail)}
+                onClick={() => emailMutation.mutate(emailInput || customerEmail!)}
+              >
+                <Mail className="h-3.5 w-3.5" />
+                {emailMutation.isPending ? 'Sending…' : 'Send'}
+              </Button>
+            </div>
+          )}
+          {emailMutation.isError && (
+            <p className="text-xs text-destructive">
+              {emailMutation.error instanceof Error ? emailMutation.error.message : 'Failed to send'}
+            </p>
+          )}
+        </div>
       )}
 
       <div className="flex gap-3 pt-2">
