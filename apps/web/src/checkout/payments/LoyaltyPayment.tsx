@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,10 +25,23 @@ export function LoyaltyPayment({ amountDue, state, onCollected, onCancel }: Paym
   const pointsNum = Math.min(Number(pointsToRedeem) || 0, maxRedeemable);
   const dollarValue = pointsNum / POINTS_PER_DOLLAR;
   const canRedeem = pointsNum > 0;
+  const [redeemError, setRedeemError] = useState('');
+
+  const redeemMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/loyalty/customers/${state.customerId}/redeem`, { points: pointsNum }),
+    onSuccess: () => {
+      onCollected({ method: 'store_credit', amount: dollarValue, reference: `${pointsNum} loyalty pts` });
+    },
+    onError: (err: unknown) => {
+      setRedeemError(err instanceof Error ? err.message : 'Failed to redeem points');
+    },
+  });
 
   function handleRedeem() {
     if (!canRedeem) return;
-    onCollected({ method: 'store_credit', amount: dollarValue, reference: `${pointsNum} loyalty pts` });
+    setRedeemError('');
+    redeemMutation.mutate();
   }
 
   if (!state.customerId) {
@@ -72,10 +85,12 @@ export function LoyaltyPayment({ amountDue, state, onCollected, onCancel }: Paym
         )}
       </div>
 
+      {redeemError && <p className="text-sm text-destructive">{redeemError}</p>}
+
       <div className="flex gap-3">
-        <Button variant="outline" className="flex-1" onClick={onCancel}>Back</Button>
-        <Button className="flex-1 h-12 text-base" disabled={!canRedeem} onClick={handleRedeem}>
-          Redeem {pointsNum > 0 ? `${pointsNum.toLocaleString()} pts` : ''}
+        <Button variant="outline" className="flex-1" onClick={onCancel} disabled={redeemMutation.isPending}>Back</Button>
+        <Button className="flex-1 h-12 text-base" disabled={!canRedeem || redeemMutation.isPending} onClick={handleRedeem}>
+          {redeemMutation.isPending ? 'Redeeming…' : `Redeem ${pointsNum > 0 ? `${pointsNum.toLocaleString()} pts` : ''}`}
         </Button>
       </div>
     </div>
