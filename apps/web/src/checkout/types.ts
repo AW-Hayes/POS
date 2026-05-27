@@ -3,7 +3,7 @@ import type React from 'react';
 // ─── Cart ─────────────────────────────────────────────────────────────────────
 
 export interface CartItem {
-  productId: string;
+  productId?: string;
   variantId?: string;
   name: string;
   sku?: string;

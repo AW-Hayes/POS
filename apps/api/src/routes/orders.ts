@@ -58,8 +58,10 @@ const createOrderSchema = z.object({
   notes: z.string().optional(),
   promotionIds: z.array(z.string()).default([]),
   items: z.array(z.object({
-    productId: z.string(),
+    productId: z.string().optional(),
     variantId: z.string().optional(),
+    name: z.string().optional(),   // required when productId is absent (misc item)
+    price: z.number().optional(),  // required when productId is absent (misc item)
     quantity: z.number().int().positive(),
     discount: z.number().min(0).default(0),
   })).min(1),
@@ -78,7 +80,7 @@ ordersRouter.post('/', async (req, res, next) => {
     const tenantSettings = tenant?.settings as Record<string, unknown>;
     const defaultTaxRate = Number(tenantSettings?.taxRate ?? 0);
 
-    const productIds = [...new Set(data.items.map((i) => i.productId))];
+    const productIds = [...new Set(data.items.filter((i) => i.productId).map((i) => i.productId as string))];
     const products = await prisma.product.findMany({
       where: { id: { in: productIds }, tenantId: req.user!.tenantId, active: true },
       include: { variants: true, category: { select: { id: true } } },
@@ -101,7 +103,22 @@ ordersRouter.post('/', async (req, res, next) => {
     let taxAmount = 0;
     let discountAmount = 0;
 
-    const orderItems = data.items.map((item) => {
+    const orderItems: Array<{ productId?: string; variantId?: string; name: string; sku?: string; price: number; quantity: number; discount: number; taxRate: number; total: number }> = data.items.map((item) => {
+      // Misc / open-price item (no productId)
+      if (!item.productId) {
+        if (!item.name || item.price === undefined) throw new AppError(400, 'Misc items require name and price');
+        const unitPrice = item.price;
+        const taxRate = defaultTaxRate;
+        const discountPerUnit = Math.min(item.discount, unitPrice);
+        const lineDiscount = discountPerUnit * item.quantity;
+        const lineSubtotal = unitPrice * item.quantity - lineDiscount;
+        const lineTax = isTaxExempt ? 0 : lineSubtotal * taxRate;
+        subtotal += lineSubtotal;
+        taxAmount += lineTax;
+        discountAmount += lineDiscount;
+        return { productId: undefined, variantId: undefined, name: item.name, sku: undefined, price: unitPrice, quantity: item.quantity, discount: discountPerUnit, taxRate: isTaxExempt ? 0 : taxRate, total: lineSubtotal + lineTax };
+      }
+
       const product = productMap.get(item.productId);
       if (!product) throw new AppError(400, `Product ${item.productId} not found`);
 
@@ -161,6 +178,7 @@ ordersRouter.post('/', async (req, res, next) => {
 
       for (const promo of promotions) {
         for (const item of orderItems) {
+          if (!item.productId) continue; // misc items don't match catalog promotions
           const product = productMap.get(item.productId)!;
           const matches =
             promo.productIds.length === 0 && promo.categoryIds.length === 0
@@ -197,7 +215,7 @@ ordersRouter.post('/', async (req, res, next) => {
         tenantId: req.user!.tenantId,
         locationId: data.locationId,
         userId: req.user!.userId,
-        items: orderItems,
+        items: orderItems as Parameters<typeof hooks.run<'order:before-create'>>[1]['payload']['items'],
         subtotal,
         taxAmount,
         discountAmount,

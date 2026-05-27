@@ -58,10 +58,11 @@ export function CheckoutModal({
         notes: hooked.meta.notes as string | undefined,
         promotionIds: (hooked.meta.promotionIds as string[] | undefined) ?? [],
         items: hooked.cart.map((item) => ({
-          productId: item.productId,
+          ...(item.productId ? { productId: item.productId } : {}),
           variantId: item.variantId,
-          quantity: item.quantity,
+          name: item.name,
           price: item.price,
+          quantity: item.quantity,
           discount: item.discount,
         })),
       });
