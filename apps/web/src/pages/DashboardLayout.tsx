@@ -176,21 +176,20 @@ export function DashboardLayout() {
                 >
                   {group.visibleItems.map((item) => {
                     const ItemIcon = item.icon;
+                    const isItemActive = item.end
+                      ? location.pathname === item.to
+                      : location.pathname.startsWith(item.to);
                     return (
-                      <DropdownMenuPrimitive.Item key={item.to} asChild>
-                        <NavLink
-                          to={item.to}
-                          end={item.end}
-                          className={({ isActive }) =>
-                            cn(
-                              dropdownItem,
-                              isActive && 'bg-primary text-primary-foreground data-[highlighted]:bg-primary',
-                            )
-                          }
-                        >
-                          <ItemIcon className="h-4 w-4" />
-                          {item.label}
-                        </NavLink>
+                      <DropdownMenuPrimitive.Item
+                        key={item.to}
+                        className={cn(
+                          dropdownItem,
+                          isItemActive && 'bg-primary text-primary-foreground',
+                        )}
+                        onSelect={() => navigate(item.to)}
+                      >
+                        <ItemIcon className="h-4 w-4" />
+                        {item.label}
                       </DropdownMenuPrimitive.Item>
                     );
                   })}
