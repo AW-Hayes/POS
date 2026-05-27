@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { formatCurrency } from '@/lib/utils';
-import { Search, Package, Plus, Pencil, Archive, Trash2 } from 'lucide-react';
+import { Search, Package, Plus, Pencil, Archive, Printer, Trash2 } from 'lucide-react';
 import type { Product, PriceBreak } from '@pos/types';
 
 interface Category { id: string; name: string }
@@ -117,6 +117,12 @@ export function ProductsPage() {
     setDialogOpen(true);
   }
 
+  async function printLabel(productId: string) {
+    const html = await api.get(`/labels/products?productIds=${productId}`).then((r) => r.data as string);
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(html); win.document.close(); }
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setFormError('');
@@ -217,6 +223,15 @@ export function ProductsPage() {
                   </td>
                   <td className="p-3">
                     <div className="flex items-center justify-end gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        title="Print label"
+                        onClick={() => printLabel(product.id)}
+                      >
+                        <Printer className="h-3.5 w-3.5" />
+                      </Button>
                       <Button
                         size="icon"
                         variant="ghost"

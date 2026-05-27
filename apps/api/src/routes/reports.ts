@@ -387,3 +387,121 @@ reportsRouter.get('/inventory-value', async (req, res, next) => {
     next(err);
   }
 });
+
+// ─── Sales by employee ────────────────────────────────────────────────────────
+
+reportsRouter.get('/sales-by-employee', async (req, res, next) => {
+  try {
+    const locationId = qs(req.query.locationId);
+    const from = qs(req.query.from);
+    const to = qs(req.query.to);
+
+    if (!from || !to) throw new AppError(400, 'from and to dates are required');
+
+    const where = {
+      tenantId: req.user!.tenantId,
+      status: 'completed' as const,
+      completedAt: { gte: new Date(from), lte: new Date(to) },
+      ...(locationId ? { locationId } : {}),
+    };
+
+    const orders = await prisma.order.findMany({
+      where,
+      select: {
+        id: true,
+        total: true,
+        subtotal: true,
+        userId: true,
+        salespersonId: true,
+        items: { select: { quantity: true } },
+        user: { select: { id: true, name: true } },
+        salesperson: { select: { id: true, name: true } },
+      },
+    });
+
+    const byEmployee: Record<string, {
+      userId: string; name: string;
+      orders: number; revenue: number; items: number; avgTicket: number;
+    }> = {};
+
+    for (const order of orders) {
+      const uid = order.salespersonId ?? order.userId;
+      const name = (order.salesperson ?? order.user)?.name ?? 'Unknown';
+      if (!byEmployee[uid]) byEmployee[uid] = { userId: uid, name, orders: 0, revenue: 0, items: 0, avgTicket: 0 };
+      byEmployee[uid].orders += 1;
+      byEmployee[uid].revenue += order.total;
+      byEmployee[uid].items += order.items.reduce((s, i) => s + i.quantity, 0);
+    }
+
+    const rows = Object.values(byEmployee).map((e) => ({
+      ...e,
+      avgTicket: e.orders > 0 ? e.revenue / e.orders : 0,
+    })).sort((a, b) => b.revenue - a.revenue);
+
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Tax liability ────────────────────────────────────────────────────────────
+
+reportsRouter.get('/tax-liability', async (req, res, next) => {
+  try {
+    const locationId = qs(req.query.locationId);
+    const from = qs(req.query.from);
+    const to = qs(req.query.to);
+
+    if (!from || !to) throw new AppError(400, 'from and to dates are required');
+
+    const where = {
+      tenantId: req.user!.tenantId,
+      status: 'completed' as const,
+      completedAt: { gte: new Date(from), lte: new Date(to) },
+      ...(locationId ? { locationId } : {}),
+    };
+
+    const orders = await prisma.order.findMany({
+      where,
+      select: {
+        id: true,
+        subtotal: true,
+        taxAmount: true,
+        total: true,
+        completedAt: true,
+        items: { select: { taxRate: true, total: true, quantity: true } },
+      },
+    });
+
+    // Group by tax rate
+    const byRate: Record<number, { taxRate: number; taxableAmount: number; taxCollected: number; orderCount: number }> = {};
+
+    for (const order of orders) {
+      for (const item of order.items) {
+        const rate = item.taxRate;
+        if (!byRate[rate]) byRate[rate] = { taxRate: rate, taxableAmount: 0, taxCollected: 0, orderCount: 0 };
+        byRate[rate].taxableAmount += item.total;
+        byRate[rate].taxCollected += item.total * (rate / (1 + rate));
+      }
+    }
+
+    // Count distinct orders per rate (approximate — an order may span multiple rates)
+    for (const order of orders) {
+      const rates = new Set(order.items.map((i) => i.taxRate));
+      for (const rate of rates) {
+        if (byRate[rate]) byRate[rate].orderCount += 1;
+      }
+    }
+
+    const rows = Object.values(byRate).sort((a, b) => b.taxRate - a.taxRate);
+    const totals = {
+      taxableAmount: rows.reduce((s, r) => s + r.taxableAmount, 0),
+      taxCollected: orders.reduce((s, o) => s + o.taxAmount, 0),
+      orderCount: orders.length,
+    };
+
+    res.json({ success: true, data: { rows, totals } });
+  } catch (err) {
+    next(err);
+  }
+});

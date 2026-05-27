@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { BarChart3, TrendingUp, Package, CreditCard, Users, Printer, Clock, Percent, DollarSign } from 'lucide-react';
+import { BarChart3, TrendingUp, Package, CreditCard, Users, Printer, Clock, Percent, DollarSign, Receipt } from 'lucide-react';
 
 interface SalesReport {
   orderCount: number;
@@ -59,7 +59,28 @@ interface CommissionRow {
   commission: number;
 }
 
-type ReportTab = 'sales' | 'salesperson' | 'commissions' | 'x-tape' | 'z-tape';
+interface EmployeeRow {
+  userId: string;
+  name: string;
+  orders: number;
+  revenue: number;
+  items: number;
+  avgTicket: number;
+}
+
+interface TaxLiabilityRow {
+  taxRate: number;
+  taxableAmount: number;
+  taxCollected: number;
+  orderCount: number;
+}
+
+interface TaxLiabilityReport {
+  rows: TaxLiabilityRow[];
+  totals: { taxableAmount: number; taxCollected: number; orderCount: number };
+}
+
+type ReportTab = 'sales' | 'salesperson' | 'commissions' | 'employee' | 'tax-liability' | 'x-tape' | 'z-tape';
 
 export function ReportsPage() {
   const today = new Date().toISOString().slice(0, 10);
@@ -99,6 +120,24 @@ export function ReportsPage() {
         .then((r) => r.data.data as CommissionRow[]),
   });
 
+  const employeeQuery = useQuery({
+    queryKey: ['reports-employee', query],
+    enabled: tab === 'employee',
+    queryFn: () =>
+      api
+        .get('/reports/sales-by-employee', { params: { from: `${query.from}T00:00:00.000Z`, to: `${query.to}T23:59:59.999Z` } })
+        .then((r) => r.data.data as EmployeeRow[]),
+  });
+
+  const taxLiabilityQuery = useQuery({
+    queryKey: ['reports-tax-liability', query],
+    enabled: tab === 'tax-liability',
+    queryFn: () =>
+      api
+        .get('/reports/tax-liability', { params: { from: `${query.from}T00:00:00.000Z`, to: `${query.to}T23:59:59.999Z` } })
+        .then((r) => r.data.data as TaxLiabilityReport),
+  });
+
   const xMutation = useMutation({
     mutationFn: () =>
       api.get('/reports/x-tape', {
@@ -128,6 +167,8 @@ export function ReportsPage() {
           { id: 'sales', label: 'Sales', icon: TrendingUp },
           { id: 'salesperson', label: 'Salesperson', icon: Users },
           { id: 'commissions', label: 'Commissions', icon: DollarSign },
+          { id: 'employee', label: 'By Employee', icon: Users },
+          { id: 'tax-liability', label: 'Tax Liability', icon: Receipt },
           { id: 'x-tape', label: 'X-Tape', icon: Clock },
           { id: 'z-tape', label: 'Z-Tape', icon: Printer },
         ] as const).map(({ id, label, icon: Icon }) => (
@@ -137,8 +178,8 @@ export function ReportsPage() {
         ))}
       </div>
 
-      {/* Date range (shared by sales + salesperson) */}
-      {(tab === 'sales' || tab === 'salesperson') && (
+      {/* Date range (shared by sales + salesperson + employee + tax-liability + commissions) */}
+      {(tab === 'sales' || tab === 'salesperson' || tab === 'employee' || tab === 'tax-liability' || tab === 'commissions') && (
         <div className="flex items-end gap-3">
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground font-medium">From</label>
@@ -295,6 +336,105 @@ export function ReportsPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* By Employee tab */}
+      {tab === 'employee' && (
+        employeeQuery.isLoading ? <p className="text-muted-foreground">Loading…</p> :
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">Sales totals for every employee who processed transactions in this period.</p>
+          <div className="border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="text-left p-3 font-medium">Employee</th>
+                  <th className="text-right p-3 font-medium">Orders</th>
+                  <th className="text-right p-3 font-medium">Items Sold</th>
+                  <th className="text-right p-3 font-medium">Avg Ticket</th>
+                  <th className="text-right p-3 font-medium">Revenue</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {(employeeQuery.data ?? []).map((row) => (
+                  <tr key={row.userId}>
+                    <td className="p-3 font-medium">{row.name}</td>
+                    <td className="p-3 text-right">{row.orders}</td>
+                    <td className="p-3 text-right">{row.items}</td>
+                    <td className="p-3 text-right text-muted-foreground">{formatCurrency(row.avgTicket)}</td>
+                    <td className="p-3 text-right font-semibold">{formatCurrency(row.revenue)}</td>
+                  </tr>
+                ))}
+                {(employeeQuery.data ?? []).length === 0 && (
+                  <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No sales data for this period</td></tr>
+                )}
+                {(employeeQuery.data ?? []).length > 0 && (
+                  <tr className="bg-muted/30 font-semibold border-t">
+                    <td colSpan={4} className="p-3 text-right">Total</td>
+                    <td className="p-3 text-right">
+                      {formatCurrency((employeeQuery.data ?? []).reduce((s, r) => s + r.revenue, 0))}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Tax Liability tab */}
+      {tab === 'tax-liability' && (
+        taxLiabilityQuery.isLoading ? <p className="text-muted-foreground">Loading…</p> :
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">Tax collected by rate for the selected period. Use for sales tax remittance.</p>
+          {taxLiabilityQuery.data && (
+            <>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="border rounded-lg p-4">
+                  <p className="text-sm text-muted-foreground">Total Orders</p>
+                  <p className="text-2xl font-bold">{taxLiabilityQuery.data.totals.orderCount}</p>
+                </div>
+                <div className="border rounded-lg p-4">
+                  <p className="text-sm text-muted-foreground">Taxable Sales</p>
+                  <p className="text-2xl font-bold">{formatCurrency(taxLiabilityQuery.data.totals.taxableAmount)}</p>
+                </div>
+                <div className="border rounded-lg p-4">
+                  <p className="text-sm text-muted-foreground">Tax Collected</p>
+                  <p className="text-2xl font-bold text-green-700">{formatCurrency(taxLiabilityQuery.data.totals.taxCollected)}</p>
+                </div>
+              </div>
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left p-3 font-medium">Tax Rate</th>
+                      <th className="text-right p-3 font-medium">Orders</th>
+                      <th className="text-right p-3 font-medium">Taxable Amount</th>
+                      <th className="text-right p-3 font-medium">Tax Collected</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {taxLiabilityQuery.data.rows.map((row) => (
+                      <tr key={row.taxRate}>
+                        <td className="p-3 font-medium">{(row.taxRate * 100).toFixed(2)}%</td>
+                        <td className="p-3 text-right text-muted-foreground">{row.orderCount}</td>
+                        <td className="p-3 text-right">{formatCurrency(row.taxableAmount)}</td>
+                        <td className="p-3 text-right font-semibold">{formatCurrency(row.taxCollected)}</td>
+                      </tr>
+                    ))}
+                    {taxLiabilityQuery.data.rows.length === 0 && (
+                      <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">No taxable transactions in this period</td></tr>
+                    )}
+                    <tr className="bg-muted/30 font-semibold border-t">
+                      <td colSpan={2} className="p-3 text-right">Total</td>
+                      <td className="p-3 text-right">{formatCurrency(taxLiabilityQuery.data.totals.taxableAmount)}</td>
+                      <td className="p-3 text-right text-green-700">{formatCurrency(taxLiabilityQuery.data.totals.taxCollected)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       )}
 

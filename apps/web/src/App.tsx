@@ -22,6 +22,7 @@ import { ReturnsPage } from '@/pages/ReturnsPage';
 import { CycleCountPage } from '@/pages/CycleCountPage';
 import { ServiceTicketsPage } from '@/pages/ServiceTicketsPage';
 import { BundlesPage } from '@/pages/BundlesPage';
+import { StockTransfersPage } from '@/pages/StockTransfersPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="cycle-counts" element={<CycleCountPage />} />
           <Route path="service-tickets" element={<ServiceTicketsPage />} />
           <Route path="bundles" element={<BundlesPage />} />
+          <Route path="stock-transfers" element={<StockTransfersPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>

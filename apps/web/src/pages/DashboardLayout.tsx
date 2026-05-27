@@ -16,7 +16,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, Warehouse, ClipboardList,
   Users, Settings, LogOut, ShoppingBag, BarChart3, Building2,
   Truck, Tag, Layers, CreditCard, FileText, Archive, Clock, ChevronDown,
-  DollarSign, RotateCcw, ClipboardCheck, Wrench, PackageOpen, Menu, X, Sun, Moon,
+  DollarSign, RotateCcw, ClipboardCheck, Wrench, PackageOpen, Menu, X, Sun, Moon, ArrowRightLeft,
 } from 'lucide-react';
 
 // ── Theme hook ────────────────────────────────────────────────────────────────
@@ -81,8 +81,9 @@ const allGroups: NavGroup[] = [
   {
     label: 'Procurement',
     items: [
-      { to: '/vendors',         label: 'Vendors',         icon: Building2, minRole: 'manager' },
-      { to: '/purchase-orders', label: 'Purchase Orders', icon: Truck,     minRole: 'manager' },
+      { to: '/vendors',           label: 'Vendors',          icon: Building2,    minRole: 'manager' },
+      { to: '/purchase-orders',   label: 'Purchase Orders',  icon: Truck,        minRole: 'manager' },
+      { to: '/stock-transfers',   label: 'Stock Transfers',  icon: ArrowRightLeft, minRole: 'manager' },
     ],
   },
   {
@@ -158,6 +159,7 @@ function SidebarContent({
   user,
   sessionId,
   onOpenEod,
+  onOpenCashMgmt,
   onLogout,
 }: {
   visibleGroups: (NavGroup & { visibleItems: NavItem[] })[];
@@ -167,6 +169,7 @@ function SidebarContent({
   user: { name?: string; role?: string } | null;
   sessionId: string | null | undefined;
   onOpenEod: () => void;
+  onOpenCashMgmt: () => void;
   onLogout: () => void;
 }) {
   return (
@@ -249,15 +252,24 @@ function SidebarContent({
 
       {/* Footer */}
       <div className="shrink-0 px-3 pb-3 space-y-1 border-t border-zinc-800 pt-3">
-        {/* Close Register */}
+        {/* Session actions */}
         {sessionId && (
-          <button
-            onClick={onOpenEod}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium text-amber-400 hover:bg-zinc-800 transition-colors"
-          >
-            <DollarSign className="h-4 w-4 shrink-0" />
-            Close Register
-          </button>
+          <>
+            <button
+              onClick={onOpenCashMgmt}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+            >
+              <DollarSign className="h-4 w-4 shrink-0" />
+              Cash In / Out
+            </button>
+            <button
+              onClick={onOpenEod}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium text-amber-400 hover:bg-zinc-800 transition-colors"
+            >
+              <DollarSign className="h-4 w-4 shrink-0" />
+              Close Register
+            </button>
+          </>
         )}
 
         {/* Theme toggle */}
@@ -303,6 +315,12 @@ export function DashboardLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [eodOpen, setEodOpen] = useState(false);
   const [denomCounts, setDenomCounts] = useState<DenomCounts>({});
+  const [cashMgmtOpen, setCashMgmtOpen] = useState(false);
+  const [cashMgmtType, setCashMgmtType] = useState<'paid_in' | 'paid_out'>('paid_in');
+  const [cashMgmtAmount, setCashMgmtAmount] = useState('');
+  const [cashMgmtReason, setCashMgmtReason] = useState('');
+  const [cashMgmtError, setCashMgmtError] = useState('');
+  const [cashMgmtSuccess, setCashMgmtSuccess] = useState('');
   const [eodNotes, setEodNotes] = useState('');
   const [eodError, setEodError] = useState('');
 
@@ -334,6 +352,40 @@ export function DashboardLayout() {
     setEodOpen(true);
   }
 
+  const cashMgmtMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/cash-drops/sessions/${sessionId}`, {
+        type: cashMgmtType,
+        amount: Math.abs(parseFloat(cashMgmtAmount)),
+        reason: cashMgmtReason.trim() || undefined,
+      }),
+    onSuccess: () => {
+      setCashMgmtSuccess(cashMgmtType === 'paid_in' ? 'Cash received.' : 'Cash disbursed.');
+      setCashMgmtAmount('');
+      setCashMgmtReason('');
+    },
+    onError: (err: unknown) => {
+      setCashMgmtError(err instanceof Error ? err.message : 'Failed to record transaction');
+    },
+  });
+
+  function openCashMgmt() {
+    setCashMgmtAmount('');
+    setCashMgmtReason('');
+    setCashMgmtError('');
+    setCashMgmtSuccess('');
+    setDrawerOpen(false);
+    setCashMgmtOpen(true);
+  }
+
+  function handleCashMgmt() {
+    setCashMgmtError('');
+    setCashMgmtSuccess('');
+    const amt = parseFloat(cashMgmtAmount);
+    if (isNaN(amt) || amt <= 0) return setCashMgmtError('Enter a valid amount');
+    cashMgmtMutation.mutate();
+  }
+
   function handleClose() {
     const closingCash = calcCashFromDenoms(denomCounts);
     closeMutation.mutate({ closingCash, notes: eodNotes.trim() || undefined });
@@ -362,6 +414,7 @@ export function DashboardLayout() {
     onThemeToggle: toggleTheme,
     user: user ?? null,
     sessionId: sessionId ?? null,
+    onOpenCashMgmt: openCashMgmt,
     onOpenEod: openEod,
     onLogout: handleLogout,
   };
@@ -559,6 +612,63 @@ export function DashboardLayout() {
               disabled={closeMutation.isPending}
             >
               {closeMutation.isPending ? 'Closing…' : 'Close Register'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Cash Management (Paid In / Out) dialog ────────────────────────────── */}
+      <Dialog open={cashMgmtOpen} onOpenChange={(o) => !cashMgmtMutation.isPending && setCashMgmtOpen(o)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cash In / Out</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant={cashMgmtType === 'paid_in' ? 'default' : 'outline'}
+                onClick={() => setCashMgmtType('paid_in')}
+              >
+                + Paid In
+              </Button>
+              <Button
+                variant={cashMgmtType === 'paid_out' ? 'default' : 'outline'}
+                onClick={() => setCashMgmtType('paid_out')}
+              >
+                − Paid Out
+              </Button>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="cm-amount">Amount</Label>
+              <Input
+                id="cm-amount"
+                type="number"
+                min={0.01}
+                step={0.01}
+                placeholder="0.00"
+                value={cashMgmtAmount}
+                onChange={(e) => setCashMgmtAmount(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="cm-reason">Reason</Label>
+              <Input
+                id="cm-reason"
+                placeholder={cashMgmtType === 'paid_in' ? 'e.g. Change from bank…' : 'e.g. Delivery driver…'}
+                value={cashMgmtReason}
+                onChange={(e) => setCashMgmtReason(e.target.value)}
+              />
+            </div>
+            {cashMgmtError && <p className="text-sm text-destructive">{cashMgmtError}</p>}
+            {cashMgmtSuccess && <p className="text-sm text-green-600">{cashMgmtSuccess}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCashMgmtOpen(false)} disabled={cashMgmtMutation.isPending}>
+              Close
+            </Button>
+            <Button onClick={handleCashMgmt} disabled={cashMgmtMutation.isPending}>
+              {cashMgmtMutation.isPending ? 'Recording…' : 'Record'}
             </Button>
           </DialogFooter>
         </DialogContent>

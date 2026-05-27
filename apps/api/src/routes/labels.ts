@@ -96,3 +96,26 @@ labelsRouter.get('/purchase-orders/:poId', async (req, res, next) => {
     next(err);
   }
 });
+
+
+// GET variant for single-product label (supports window.open from browser)
+labelsRouter.get('/products', async (req, res, next) => {
+  try {
+    const raw = req.query.productIds;
+    const productIds = Array.isArray(raw) ? raw as string[] : raw ? [raw as string] : [];
+    const copies = Math.min(Number(req.query.copies ?? 1), 100);
+    if (productIds.length === 0) throw new AppError(400, 'productIds required');
+
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds }, tenantId: req.user!.tenantId },
+      select: { id: true, name: true, sku: true, barcode: true, price: true },
+    });
+
+    const items = products.flatMap(p => Array(copies).fill({ name: p.name, sku: p.sku, barcode: p.barcode, price: p.price }));
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(labelHtml(items));
+  } catch (err) {
+    next(err);
+  }
+});
