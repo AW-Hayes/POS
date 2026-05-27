@@ -23,6 +23,7 @@ import { CardPayment } from './payments/CardPayment';
 import { LoyaltyPayment } from './payments/LoyaltyPayment';
 import { HouseAccountPayment } from './payments/HouseAccountPayment';
 import { Banknote, CreditCard, Star, Building2 } from 'lucide-react';
+import { api } from '@/lib/api';
 
 /**
  * Register the default checkout pipeline and built-in payment methods.
@@ -66,4 +67,16 @@ export function initCheckout(): void {
   paymentMethodRegistry.register({ id: 'card',          label: 'Card',          icon: CreditCard, component: CardPayment });
   paymentMethodRegistry.register({ id: 'loyalty',       label: 'Loyalty Points', icon: Star,       component: LoyaltyPayment });
   paymentMethodRegistry.register({ id: 'house_account', label: 'House Account', icon: Building2,  component: HouseAccountPayment });
+
+  // Earn loyalty points after every completed order that has a customer
+  pipelineRegistry.on('pipeline:after-submit', async (state) => {
+    if (state.customerId && state.orderId) {
+      try {
+        await api.post(`/loyalty/orders/${state.orderId}/earn`, { pointsPerDollar: 1 });
+      } catch {
+        // Non-fatal — don't block receipt
+      }
+    }
+    return state;
+  });
 }

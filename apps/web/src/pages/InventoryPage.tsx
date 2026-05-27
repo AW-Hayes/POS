@@ -9,7 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
 } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Search, AlertTriangle, SlidersHorizontal, PackagePlus, ArrowLeftRight } from 'lucide-react';
+import { Search, AlertTriangle, SlidersHorizontal, PackagePlus, ArrowLeftRight, Bell } from 'lucide-react';
 import type { InventoryWithProduct } from '@pos/types';
 
 const ADJUSTMENT_TYPES = [
@@ -50,6 +50,9 @@ export function InventoryPage() {
   const [adjustItem, setAdjustItem] = useState<InventoryWithProduct | null>(null);
   const [form, setForm] = useState<AdjustFormData>({ delta: '', type: 'adjustment', note: '' });
   const [formError, setFormError] = useState('');
+  const [reorderItem, setReorderItem] = useState<InventoryWithProduct | null>(null);
+  const [reorderForm, setReorderForm] = useState({ reorderPoint: '', reorderQty: '' });
+  const [reorderError, setReorderError] = useState('');
 
   // Receive stock dialog state
   const [showReceive, setShowReceive] = useState(false);
@@ -140,6 +143,38 @@ export function InventoryPage() {
       setTransferError(err instanceof Error ? err.message : 'Transfer failed');
     },
   });
+
+  const reorderMutation = useMutation({
+    mutationFn: (payload: { reorderPoint: number | null; reorderQty: number | null }) =>
+      api.put(`/inventory/${reorderItem!.locationId}/${reorderItem!.productId}/reorder`, {
+        variantId: reorderItem!.variantId ?? undefined,
+        ...payload,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      setReorderItem(null);
+    },
+    onError: (err: unknown) => {
+      setReorderError(err instanceof Error ? err.message : 'Failed to save');
+    },
+  });
+
+  function openReorder(item: InventoryWithProduct) {
+    setReorderItem(item);
+    setReorderForm({
+      reorderPoint: item.reorderPoint != null ? String(item.reorderPoint) : '',
+      reorderQty: item.reorderQty != null ? String(item.reorderQty) : '',
+    });
+    setReorderError('');
+  }
+
+  function handleReorderSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    reorderMutation.mutate({
+      reorderPoint: reorderForm.reorderPoint ? Number(reorderForm.reorderPoint) : null,
+      reorderQty: reorderForm.reorderQty ? Number(reorderForm.reorderQty) : null,
+    });
+  }
 
   function openAdjust(item: InventoryWithProduct) {
     setAdjustItem(item);
@@ -256,14 +291,15 @@ export function InventoryPage() {
                 <th className="text-left p-3 font-medium">Variant</th>
                 <th className="text-left p-3 font-medium">SKU</th>
                 <th className="text-right p-3 font-medium">Qty</th>
-                <th className="text-right p-3 font-medium">Low Stock At</th>
+                <th className="text-right p-3 font-medium">Reorder Pt</th>
+                <th className="text-right p-3 font-medium">Reorder Qty</th>
                 <th className="text-center p-3 font-medium">Status</th>
                 <th className="p-3" />
               </tr>
             </thead>
             <tbody className="divide-y">
               {items.map((item) => {
-                const isLow = item.lowStockAt != null && item.quantity <= item.lowStockAt;
+                const isLow = item.reorderPoint != null && item.quantity <= item.reorderPoint;
                 return (
                   <tr key={item.id} className="hover:bg-muted/30 transition-colors">
                     <td className="p-3 font-medium">{item.product.name}</td>
@@ -275,17 +311,29 @@ export function InventoryPage() {
                       {item.quantity}
                     </td>
                     <td className="p-3 text-right text-muted-foreground tabular-nums">
-                      {item.lowStockAt ?? '—'}
+                      {item.reorderPoint ?? '—'}
+                    </td>
+                    <td className="p-3 text-right text-muted-foreground tabular-nums">
+                      {item.reorderQty ?? '—'}
                     </td>
                     <td className="p-3 text-center">
                       {isLow ? (
-                        <Badge variant="destructive">Low Stock</Badge>
+                        <Badge variant="destructive">Reorder</Badge>
                       ) : (
                         <Badge variant="success">In Stock</Badge>
                       )}
                     </td>
                     <td className="p-3">
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          title="Reorder settings"
+                          onClick={() => openReorder(item)}
+                        >
+                          <Bell className="h-3.5 w-3.5" />
+                        </Button>
                         <Button
                           size="icon"
                           variant="ghost"
@@ -302,7 +350,7 @@ export function InventoryPage() {
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                  <td colSpan={8} className="p-8 text-center text-muted-foreground">
                     No inventory records found
                   </td>
                 </tr>
@@ -548,6 +596,59 @@ export function InventoryPage() {
               </DialogClose>
               <Button type="submit" disabled={transferMutation.isPending}>
                 {transferMutation.isPending ? 'Transferring…' : 'Transfer'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reorder Settings dialog */}
+      <Dialog open={!!reorderItem} onOpenChange={(open) => !open && setReorderItem(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reorder Settings</DialogTitle>
+          </DialogHeader>
+          {reorderItem && (
+            <div className="mb-2 rounded-md bg-muted px-4 py-3 text-sm">
+              <p className="font-medium">{reorderItem.product.name}</p>
+              {variantLabel(reorderItem) && (
+                <p className="text-muted-foreground">{variantLabel(reorderItem)}</p>
+              )}
+            </div>
+          )}
+          <form onSubmit={handleReorderSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="ro-point">Reorder Point</Label>
+              <Input
+                id="ro-point"
+                type="number"
+                min="0"
+                step="1"
+                value={reorderForm.reorderPoint}
+                onChange={(e) => setReorderForm((f) => ({ ...f, reorderPoint: e.target.value }))}
+                placeholder="e.g. 10 (blank to clear)"
+              />
+              <p className="text-xs text-muted-foreground">Alert when qty drops to or below this number.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ro-qty">Reorder Quantity</Label>
+              <Input
+                id="ro-qty"
+                type="number"
+                min="0"
+                step="1"
+                value={reorderForm.reorderQty}
+                onChange={(e) => setReorderForm((f) => ({ ...f, reorderQty: e.target.value }))}
+                placeholder="e.g. 50 (suggested order qty)"
+              />
+            </div>
+            {reorderError && <p className="text-sm text-destructive">{reorderError}</p>}
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button type="button" variant="outline">Cancel</Button>
+              </DialogClose>
+              <Button type="submit" disabled={reorderMutation.isPending}>
+                {reorderMutation.isPending ? 'Saving…' : 'Save'}
               </Button>
             </DialogFooter>
           </form>

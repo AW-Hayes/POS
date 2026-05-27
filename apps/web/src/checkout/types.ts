@@ -8,10 +8,12 @@ export interface CartItem {
   name: string;
   sku?: string;
   price: number;
+  listPrice?: number;
   cost?: number;
   quantity: number;
   discount: number;
   requiresAgeVerification?: boolean;
+  priceBreaks?: Array<{ minQty: number; price: number }>;
 }
 
 // ─── Checkout state ────────────────────────────────────────────────────────────
