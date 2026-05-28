@@ -22,9 +22,25 @@ const createTenantSchema = z.object({
   }),
 });
 
-// Bootstrap: create a new tenant (no auth required for first setup)
+// Bootstrap: create a new tenant.
+// Requires either (a) a SETUP_SECRET env var that matches the X-Setup-Secret header,
+// or (b) no tenants exist yet (true first-run). This prevents arbitrary tenant creation
+// on a running deployment that hasn't set a setup secret.
 tenantsRouter.post('/', async (req, res, next) => {
   try {
+    const setupSecret = process.env.SETUP_SECRET;
+    if (setupSecret) {
+      if (req.headers['x-setup-secret'] !== setupSecret) {
+        throw new AppError(403, 'Invalid or missing setup secret');
+      }
+    } else {
+      // No secret configured — only allow if this is the very first tenant
+      const existing = await prisma.tenant.count();
+      if (existing > 0) {
+        throw new AppError(403, 'Set SETUP_SECRET to create additional tenants');
+      }
+    }
+
     const data = createTenantSchema.parse(req.body);
 
     const existing = await prisma.tenant.findUnique({ where: { slug: data.slug } });

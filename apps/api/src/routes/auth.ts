@@ -1,12 +1,31 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import { rateLimit } from 'express-rate-limit';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../middleware/errorHandler';
 import { authenticate } from '../middleware/auth';
 
 export const authRouter = Router();
+
+// 10 attempts per 15 minutes per IP — applies to both login endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many login attempts. Please try again in 15 minutes.' },
+});
+
+// PIN login is 4-6 digits — smaller window to limit brute force on the shorter key space
+const pinLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many PIN attempts. Please try again in 15 minutes.' },
+});
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -25,7 +44,7 @@ function signToken(payload: object): string {
   return jwt.sign(payload, secret, { expiresIn: (process.env.JWT_EXPIRES_IN ?? '8h') as any });
 }
 
-authRouter.post('/login', async (req, res, next) => {
+authRouter.post('/login', authLimiter as unknown as RequestHandler, async (req, res, next) => {
   try {
     const { email, password } = loginSchema.parse(req.body);
 
@@ -46,7 +65,7 @@ authRouter.post('/login', async (req, res, next) => {
   }
 });
 
-authRouter.post('/pin-login', async (req, res, next) => {
+authRouter.post('/pin-login', pinLimiter as unknown as RequestHandler, async (req, res, next) => {
   try {
     const { registerId, pin } = pinLoginSchema.parse(req.body);
 

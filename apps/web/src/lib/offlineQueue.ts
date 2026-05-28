@@ -68,6 +68,27 @@ export async function listPending(): Promise<PendingOrder[]> {
   }
 }
 
+export async function incrementRetries(localId: string): Promise<void> {
+  const db = await openDB();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const store = tx.objectStore(STORE);
+      const getReq = store.get(localId);
+      getReq.onsuccess = () => {
+        const record = getReq.result as PendingOrder | undefined;
+        if (!record) { resolve(); return; }
+        const putReq = store.put({ ...record, retries: record.retries + 1 });
+        putReq.onsuccess = () => resolve();
+        putReq.onerror = () => reject(putReq.error);
+      };
+      getReq.onerror = () => reject(getReq.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
 export async function removePending(localId: string): Promise<void> {
   const db = await openDB();
   try {
@@ -82,20 +103,31 @@ export async function removePending(localId: string): Promise<void> {
   }
 }
 
+const MAX_RETRIES = 5;
+
 export async function syncPending(
   submitFn: (payload: PendingOrderPayload) => Promise<string>,
-): Promise<{ synced: number; failed: number }> {
+): Promise<{ synced: number; failed: number; abandoned: number }> {
   const pending = await listPending();
   let synced = 0;
   let failed = 0;
+  let abandoned = 0;
   for (const item of pending) {
+    if (item.retries >= MAX_RETRIES) {
+      // Order has failed too many times — remove it so it doesn't block the queue forever.
+      // In a production system you'd move it to a dead-letter store; here we just drop it.
+      await removePending(item.localId);
+      abandoned++;
+      continue;
+    }
     try {
       await submitFn(item.payload);
       await removePending(item.localId);
       synced++;
     } catch {
+      await incrementRetries(item.localId);
       failed++;
     }
   }
-  return { synced, failed };
+  return { synced, failed, abandoned };
 }
