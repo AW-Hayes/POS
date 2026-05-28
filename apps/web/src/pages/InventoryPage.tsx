@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Input } from '@/components/ui/input';
@@ -9,7 +9,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
 } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Search, AlertTriangle, SlidersHorizontal, PackagePlus, ArrowLeftRight, Bell } from 'lucide-react';
+import { Search, AlertTriangle, SlidersHorizontal, PackagePlus, ArrowLeftRight, Bell, Upload, FileText, CheckCircle, XCircle } from 'lucide-react';
+import { parseCSV, generateCSVTemplate } from '@/lib/csvUtils';
 import type { InventoryWithProduct } from '@pos/types';
 
 const ADJUSTMENT_TYPES = [
@@ -56,6 +57,14 @@ export function InventoryPage() {
 
   // Receive stock dialog state
   const [showReceive, setShowReceive] = useState(false);
+
+  // CSV import dialog state
+  const [showImport, setShowImport] = useState(false);
+  const [csvStep, setCsvStep] = useState<'upload' | 'preview' | 'results'>('upload');
+  const [csvText, setCsvText] = useState('');
+  const [csvParsed, setCsvParsed] = useState<{ headers: string[]; rows: Record<string, string>[] } | null>(null);
+  const [csvResults, setCsvResults] = useState<{ imported: number; errors: { row: number; error: string }[] } | null>(null);
+  const csvFileRef = useRef<HTMLInputElement>(null);
 
   // Transfer dialog state
   const [showTransfer, setShowTransfer] = useState(false);
@@ -165,6 +174,48 @@ export function InventoryPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['inventory'] }),
   });
 
+  const importMutation = useMutation({
+    mutationFn: (csv: string) =>
+      api.post('/inventory/import-csv', { csv }).then((r) => r.data.data as { imported: number; errors: { row: number; error: string }[] }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      setCsvResults(data);
+      setCsvStep('results');
+    },
+  });
+
+  function openImport() {
+    setShowImport(true);
+    setCsvStep('upload');
+    setCsvText('');
+    setCsvParsed(null);
+    setCsvResults(null);
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target?.result as string;
+      setCsvText(text);
+      setCsvParsed(parseCSV(text));
+      setCsvStep('preview');
+    };
+    reader.readAsText(file);
+  }
+
+  function downloadTemplate() {
+    const csv = generateCSVTemplate();
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'inventory_import_template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function openReorder(item: InventoryWithProduct) {
     setReorderItem(item);
     setReorderForm({
@@ -273,6 +324,10 @@ export function InventoryPage() {
           >
             <ArrowLeftRight className="h-4 w-4 mr-1" />
             Transfer
+          </Button>
+          <Button variant="outline" size="sm" onClick={openImport}>
+            <Upload className="h-4 w-4 mr-1" />
+            Import CSV
           </Button>
           <Button
             variant={showLowStock ? 'destructive' : 'outline'}
@@ -676,6 +731,112 @@ export function InventoryPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* CSV Import dialog */}
+      <Dialog open={showImport} onOpenChange={(open) => !open && setShowImport(false)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5" />
+              Import Inventory CSV
+            </DialogTitle>
+          </DialogHeader>
+
+          {csvStep === 'upload' && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Upload a CSV with columns: <code className="text-xs bg-muted px-1 rounded">sku</code> or <code className="text-xs bg-muted px-1 rounded">barcode</code>, <code className="text-xs bg-muted px-1 rounded">location</code>, <code className="text-xs bg-muted px-1 rounded">quantity</code>. Optional: <code className="text-xs bg-muted px-1 rounded">reorder_point</code>, <code className="text-xs bg-muted px-1 rounded">reorder_qty</code>, <code className="text-xs bg-muted px-1 rounded">bin_location</code>, <code className="text-xs bg-muted px-1 rounded">cost</code>.
+              </p>
+              <div
+                className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:bg-muted/30 transition-colors"
+                onClick={() => csvFileRef.current?.click()}
+              >
+                <FileText className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                <p className="text-sm font-medium">Click to select a CSV file</p>
+                <p className="text-xs text-muted-foreground mt-1">.csv files only</p>
+                <input
+                  ref={csvFileRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+              </div>
+              <div className="flex justify-between items-center pt-1">
+                <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground" onClick={downloadTemplate}>
+                  <FileText className="h-4 w-4" />
+                  Download template
+                </Button>
+                <Button variant="outline" onClick={() => setShowImport(false)}>Cancel</Button>
+              </div>
+            </div>
+          )}
+
+          {csvStep === 'preview' && csvParsed && (
+            <div className="space-y-4">
+              <p className="text-sm">
+                <span className="font-medium">{csvParsed.rows.length} rows</span> detected with columns:{' '}
+                <span className="text-muted-foreground">{csvParsed.headers.join(', ')}</span>
+              </p>
+              {csvParsed.rows.length > 0 && (
+                <div className="border rounded-lg overflow-auto max-h-48 text-xs">
+                  <table className="w-full">
+                    <thead className="bg-muted/50">
+                      <tr>{csvParsed.headers.map((h) => <th key={h} className="text-left p-2 font-medium whitespace-nowrap">{h}</th>)}</tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {csvParsed.rows.slice(0, 5).map((row, i) => (
+                        <tr key={i}>
+                          {csvParsed.headers.map((h) => <td key={h} className="p-2 whitespace-nowrap">{row[h]}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {csvParsed.rows.length > 5 && (
+                    <p className="p-2 text-muted-foreground">…and {csvParsed.rows.length - 5} more rows</p>
+                  )}
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setCsvStep('upload')}>Back</Button>
+                <Button
+                  onClick={() => importMutation.mutate(csvText)}
+                  disabled={importMutation.isPending}
+                >
+                  {importMutation.isPending ? 'Importing…' : `Import ${csvParsed.rows.length} rows`}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {csvStep === 'results' && csvResults && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
+                <CheckCircle className="h-6 w-6 text-green-600 shrink-0" />
+                <div>
+                  <p className="font-medium">{csvResults.imported} rows imported successfully</p>
+                  {csvResults.errors.length > 0 && (
+                    <p className="text-sm text-muted-foreground">{csvResults.errors.length} rows had errors</p>
+                  )}
+                </div>
+              </div>
+              {csvResults.errors.length > 0 && (
+                <div className="border border-destructive/30 rounded-lg overflow-auto max-h-40 text-xs">
+                  {csvResults.errors.map((err) => (
+                    <div key={err.row} className="flex gap-2 p-2 border-b last:border-0">
+                      <XCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+                      <span><span className="font-medium">Row {err.row}:</span> {err.error}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <DialogFooter>
+                <Button onClick={() => setShowImport(false)}>Done</Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

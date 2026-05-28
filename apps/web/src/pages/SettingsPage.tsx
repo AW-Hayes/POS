@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
@@ -15,8 +16,9 @@ import {
 import {
   Monitor, Tablet, List, BookOpen, CreditCard, Save,
   Building2, PlusCircle, Pencil, Trash2,
-  Star, Settings, AlertCircle,
+  Star, Settings, AlertCircle, Keyboard, RotateCcw,
 } from 'lucide-react';
+import { DEFAULT_HOTKEYS, loadHotkeyMap, saveHotkeyMap, resetHotkeyMap, eventToKey } from '@/lib/hotkeys';
 import type { PaymentTerminalConfig } from '@pos/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -28,10 +30,11 @@ type Tenant = { id: string; name: string; slug: string; settings: Record<string,
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 
-type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty';
+type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard';
 
 const allTabs: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'terminal',  label: 'Terminal' },
+  { id: 'keyboard',  label: 'Keyboard' },
   { id: 'general',   label: 'General',   adminOnly: true },
   { id: 'locations', label: 'Locations', adminOnly: true },
   { id: 'registers', label: 'Registers', adminOnly: true },
@@ -1058,12 +1061,169 @@ function LoyaltyTab() {
   );
 }
 
+// ─── Keyboard tab ─────────────────────────────────────────────────────────────
+
+function KeyboardTab() {
+  const [map, setMap] = useState<Record<string, string>>(() => loadHotkeyMap());
+  const [recording, setRecording] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  // Find duplicate keys (excluding the one currently being recorded)
+  const keyCounts: Record<string, string[]> = {};
+  for (const [id, key] of Object.entries(map)) {
+    if (!keyCounts[key]) keyCounts[key] = [];
+    keyCounts[key].push(id);
+  }
+  const duplicates = new Set(
+    Object.entries(keyCounts)
+      .filter(([, ids]) => ids.length > 1)
+      .flatMap(([, ids]) => ids),
+  );
+
+  const startRecording = useCallback((id: string) => {
+    setRecording(id);
+  }, []);
+
+  useEffect(() => {
+    if (!recording) return;
+    function onKey(e: KeyboardEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        setRecording(null);
+        return;
+      }
+      const key = eventToKey(e);
+      setMap((prev) => ({ ...prev, [recording!]: key }));
+      setRecording(null);
+    }
+    document.addEventListener('keydown', onKey, { capture: true });
+    return () => document.removeEventListener('keydown', onKey, { capture: true });
+  }, [recording]);
+
+  function handleSave() {
+    saveHotkeyMap(map);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  function handleReset() {
+    resetHotkeyMap();
+    setMap(loadHotkeyMap());
+  }
+
+  const navDefs = DEFAULT_HOTKEYS.filter((d) => d.group === 'Navigation');
+  const actionDefs = DEFAULT_HOTKEYS.filter((d) => d.group === 'Actions');
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Keyboard className="h-5 w-5" />
+          Keyboard Shortcuts
+        </CardTitle>
+        <CardDescription>
+          Click any key badge to remap it. Press the new key (or Escape to cancel).
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+              Navigation
+            </p>
+            <div className="space-y-1">
+              {navDefs.map((def) => {
+                const key = map[def.id] ?? def.defaultKey;
+                const isRecording = recording === def.id;
+                const isDupe = duplicates.has(def.id);
+                return (
+                  <div key={def.id} className="flex items-center justify-between gap-4 py-1">
+                    <span className="text-sm">{def.label}</span>
+                    <button
+                      onClick={() => startRecording(def.id)}
+                      className={cn(
+                        'inline-flex items-center px-2 py-0.5 rounded border text-xs font-mono whitespace-nowrap transition-colors',
+                        isRecording
+                          ? 'border-primary bg-primary/10 text-primary animate-pulse'
+                          : isDupe
+                          ? 'border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20'
+                          : 'border-border bg-muted hover:bg-muted/80',
+                      )}
+                    >
+                      {isRecording ? 'press key…' : key}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+              Actions
+            </p>
+            <div className="space-y-1">
+              {actionDefs.map((def) => {
+                const key = map[def.id] ?? def.defaultKey;
+                const isRecording = recording === def.id;
+                const isDupe = duplicates.has(def.id);
+                return (
+                  <div key={def.id} className="flex items-center justify-between gap-4 py-1">
+                    <span className="text-sm">{def.label}</span>
+                    <button
+                      onClick={() => startRecording(def.id)}
+                      className={cn(
+                        'inline-flex items-center px-2 py-0.5 rounded border text-xs font-mono whitespace-nowrap transition-colors',
+                        isRecording
+                          ? 'border-primary bg-primary/10 text-primary animate-pulse'
+                          : isDupe
+                          ? 'border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20'
+                          : 'border-border bg-muted hover:bg-muted/80',
+                      )}
+                    >
+                      {isRecording ? 'press key…' : key}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {duplicates.size > 0 && (
+          <p className="text-sm text-destructive flex items-center gap-1.5">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            Some shortcuts share the same key — highlighted in red. Resolve conflicts before saving.
+          </p>
+        )}
+
+        <div className="flex items-center gap-3 pt-2 border-t">
+          <Button className="gap-2" onClick={handleSave} disabled={duplicates.size > 0}>
+            <Save className="h-4 w-4" />
+            Save Shortcuts
+          </Button>
+          <Button variant="outline" className="gap-2" onClick={handleReset}>
+            <RotateCcw className="h-4 w-4" />
+            Reset to Defaults
+          </Button>
+          {saved && <span className="text-sm text-green-600 font-medium">Saved!</span>}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
-  const [tab, setTab] = useState<Tab>('terminal');
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => {
+    const qTab = searchParams.get('tab') as Tab | null;
+    return qTab && allTabs.some((t) => t.id === qTab) ? qTab : 'terminal';
+  });
 
   const visibleTabs = allTabs.filter((t) => !t.adminOnly || isAdmin);
 
@@ -1094,6 +1254,7 @@ export function SettingsPage() {
 
       {/* Tab content */}
       {tab === 'terminal'  && <TerminalTab />}
+      {tab === 'keyboard'  && <KeyboardTab />}
       {tab === 'general'   && isAdmin && <GeneralTab />}
       {tab === 'locations' && isAdmin && <LocationsTab />}
       {tab === 'registers' && isAdmin && <RegistersTab />}
