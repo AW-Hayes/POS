@@ -9,12 +9,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
 } from '@/components/ui/dialog';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { Search, User, Star, CreditCard, ChevronRight, Plus, Pencil } from 'lucide-react';
-import type { Customer, LoyaltyTransaction } from '@pos/types';
+import { Search, User, Star, CreditCard, Plus, Pencil, ShoppingBag, ChevronRight } from 'lucide-react';
+import type { Customer, LoyaltyTransaction, Order } from '@pos/types';
 
 interface CustomerDetail {
   customer: Customer & { loyaltyTransactions?: LoyaltyTransaction[] };
-  tab: 'info' | 'loyalty' | 'ar';
+  tab: 'info' | 'loyalty' | 'ar' | 'orders';
 }
 
 interface CustomerFormData {
@@ -48,6 +48,14 @@ export function CustomersPage() {
     enabled: !!detail?.customer.id && detail.tab === 'loyalty',
     queryFn: () =>
       api.get(`/loyalty/customers/${detail!.customer.id}`).then((r) => r.data.data),
+  });
+
+  const { data: ordersData } = useQuery({
+    queryKey: ['customer-orders', detail?.customer.id],
+    enabled: !!detail?.customer.id && detail.tab === 'orders',
+    queryFn: () =>
+      api.get('/orders', { params: { customerId: detail!.customer.id, pageSize: 50, status: 'completed' } })
+        .then((r) => r.data.data as Order[]),
   });
 
   const arPayMutation = useMutation({
@@ -133,14 +141,14 @@ export function CustomersPage() {
         </div>
 
         <div className="flex gap-2">
-          {(['info', 'loyalty', 'ar'] as const).map((tab) => (
+          {(['info', 'orders', 'loyalty', 'ar'] as const).map((tab) => (
             <Button
               key={tab}
               size="sm"
               variant={detail.tab === tab ? 'default' : 'outline'}
               onClick={() => setDetail({ ...detail, tab })}
             >
-              {tab === 'info' ? 'Info' : tab === 'loyalty' ? 'Loyalty' : 'House Account'}
+              {tab === 'info' ? 'Info' : tab === 'orders' ? 'Orders' : tab === 'loyalty' ? 'Loyalty' : 'House Account'}
             </Button>
           ))}
         </div>
@@ -154,6 +162,60 @@ export function CustomersPage() {
             {c.taxExemptCertificate && <Row label="Certificate" value={c.taxExemptCertificate} />}
             <Row label="Email Receipts" value={c.emailReceiptsEnabled ? 'Enabled' : 'Disabled'} />
             <Row label="Customer Since" value={formatDate(c.createdAt)} />
+          </div>
+        )}
+
+        {detail.tab === 'orders' && (
+          <div className="space-y-3">
+            {!ordersData && (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            )}
+            {ordersData && ordersData.length === 0 && (
+              <div className="border rounded-lg p-8 text-center text-muted-foreground">
+                <ShoppingBag className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                <p className="text-sm">No completed orders yet</p>
+              </div>
+            )}
+            {ordersData && ordersData.length > 0 && (
+              <>
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <span>{ordersData.length} order{ordersData.length !== 1 ? 's' : ''}</span>
+                  <span className="font-medium text-foreground">
+                    Total spent: {formatCurrency(ordersData.reduce((s, o) => s + o.total, 0))}
+                  </span>
+                </div>
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-3 font-medium">Order #</th>
+                        <th className="text-left p-3 font-medium">Date</th>
+                        <th className="text-right p-3 font-medium">Items</th>
+                        <th className="text-right p-3 font-medium">Total</th>
+                        <th className="text-left p-3 font-medium">Payment</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {ordersData.map((order) => (
+                        <tr key={order.id} className="hover:bg-muted/30">
+                          <td className="p-3 font-mono text-xs">#{order.id.slice(-8).toUpperCase()}</td>
+                          <td className="p-3 text-muted-foreground">{formatDate(order.completedAt ?? order.createdAt)}</td>
+                          <td className="p-3 text-right tabular-nums">{order.items.length}</td>
+                          <td className="p-3 text-right tabular-nums font-medium">{formatCurrency(order.total)}</td>
+                          <td className="p-3">
+                            <div className="flex flex-wrap gap-1">
+                              {order.payments.map((p, i) => (
+                                <Badge key={i} variant="secondary" className="text-xs capitalize">{p.method}</Badge>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         )}
 

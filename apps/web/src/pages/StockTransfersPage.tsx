@@ -11,7 +11,22 @@ import {
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { formatCurrency } from '@/lib/utils';
 import { ArrowRightLeft, Plus, Trash2, Search } from 'lucide-react';
+import { formatDate } from '@/lib/utils';
 import type { Product } from '@pos/types';
+
+interface TransferAdjustment {
+  id: string;
+  type: string;
+  delta: number;
+  quantityAfter: number;
+  note?: string;
+  createdAt: string;
+  inventoryItem: {
+    locationId: string;
+    product: { id: string; name: string; sku?: string };
+  };
+  user?: { id: string; name: string } | null;
+}
 
 interface Location { id: string; name: string }
 
@@ -39,6 +54,15 @@ export function StockTransfersPage() {
     queryFn: () => api.get('/locations').then((r) => r.data.data),
   });
 
+  const { data: transferHistory = [], isLoading: historyLoading } = useQuery<TransferAdjustment[]>({
+    queryKey: ['transfer-history'],
+    queryFn: () =>
+      api.get('/inventory/adjustments', { params: { type: 'transfer_out', pageSize: 50 } })
+        .then((r) => r.data.data),
+  });
+
+  const locationMap = new Map(locations.map((l) => [l.id, l.name]));
+
   const { data: products = [] } = useQuery<Product[]>({
     queryKey: ['products-transfer', productSearch],
     queryFn: () =>
@@ -60,6 +84,7 @@ export function StockTransfersPage() {
       setNote('');
       setOpen(false);
       qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['transfer-history'] });
     },
     onError: (err: unknown) => {
       setFormError(err instanceof Error ? err.message : 'Transfer failed');
@@ -116,15 +141,54 @@ export function StockTransfersPage() {
         </div>
       )}
 
-      <div className="rounded-lg border bg-muted/30 p-8 text-center text-muted-foreground">
-        <ArrowRightLeft className="h-10 w-10 mx-auto mb-3 opacity-40" />
-        <p className="font-medium">Transfer inventory between locations</p>
-        <p className="text-sm mt-1">Each transfer debits the source and credits the destination with a full audit trail.</p>
-        <Button className="mt-4" onClick={openNew}>
-          <Plus className="h-4 w-4 mr-2" />
-          Start a Transfer
-        </Button>
-      </div>
+      {historyLoading && <p className="text-sm text-muted-foreground">Loading history…</p>}
+
+      {!historyLoading && transferHistory.length === 0 && (
+        <div className="rounded-lg border bg-muted/30 p-8 text-center text-muted-foreground">
+          <ArrowRightLeft className="h-10 w-10 mx-auto mb-3 opacity-40" />
+          <p className="font-medium">No transfers yet</p>
+          <p className="text-sm mt-1">Each transfer debits the source and credits the destination with a full audit trail.</p>
+          <Button className="mt-4" onClick={openNew}>
+            <Plus className="h-4 w-4 mr-2" />Start a Transfer
+          </Button>
+        </div>
+      )}
+
+      {!historyLoading && transferHistory.length > 0 && (
+        <div className="border rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left p-3 font-medium">Product</th>
+                <th className="text-left p-3 font-medium">From Location</th>
+                <th className="text-right p-3 font-medium">Qty</th>
+                <th className="text-left p-3 font-medium">Note</th>
+                <th className="text-left p-3 font-medium">By</th>
+                <th className="text-left p-3 font-medium">Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {transferHistory.map((adj) => (
+                <tr key={adj.id} className="hover:bg-muted/30">
+                  <td className="p-3">
+                    <p className="font-medium">{adj.inventoryItem.product.name}</p>
+                    {adj.inventoryItem.product.sku && (
+                      <p className="text-xs text-muted-foreground">{adj.inventoryItem.product.sku}</p>
+                    )}
+                  </td>
+                  <td className="p-3 text-muted-foreground">
+                    {locationMap.get(adj.inventoryItem.locationId) ?? adj.inventoryItem.locationId}
+                  </td>
+                  <td className="p-3 text-right tabular-nums font-medium">{Math.abs(adj.delta)}</td>
+                  <td className="p-3 text-muted-foreground text-xs">{adj.note ?? '—'}</td>
+                  <td className="p-3 text-muted-foreground text-xs">{adj.user?.name ?? '—'}</td>
+                  <td className="p-3 text-muted-foreground text-xs">{formatDate(adj.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Transfer dialog */}
       <Dialog open={open} onOpenChange={(o) => { if (!transferMutation.isPending) setOpen(o); }}>
