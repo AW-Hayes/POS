@@ -1,10 +1,12 @@
 import axios from 'axios';
 
-// In the packaged Tauri app there is no Vite dev proxy, so relative URLs
-// like '/api' resolve to tauri://localhost/api and never reach the API server.
-// window.__TAURI_INTERNALS__ is injected by the Tauri v2 runtime, so we can
-// detect it at runtime and switch to the full server URL.
-const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+// In the packaged Tauri app there is no Vite dev proxy, so relative '/api'
+// never reaches the API server. TAURI_ENV_PLATFORM is injected by tauri-cli
+// at build time (exposed via envPrefix in vite.config.ts), so it's a reliable
+// indicator that we're running as a native app and need the full server URL.
+const isTauri =
+  Boolean(import.meta.env.TAURI_ENV_PLATFORM) ||
+  (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window);
 const baseURL = isTauri
   ? `${import.meta.env.VITE_API_URL ?? 'http://localhost:3001'}/api`
   : '/api';
