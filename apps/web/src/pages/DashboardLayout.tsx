@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/auth';
@@ -436,9 +436,14 @@ export function DashboardLayout() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
   });
 
-  // Auto-sync when coming back online
-  const wasOffline = !online;
-  if (online && wasOffline && pendingCount > 0) syncMutation.mutate();
+  // Auto-sync when coming back online (track prev state to detect offline→online transition)
+  const prevOnlineRef = useRef(online);
+  useEffect(() => {
+    if (online && !prevOnlineRef.current && pendingCount > 0) {
+      syncMutation.mutate();
+    }
+    prevOnlineRef.current = online;
+  }, [online, pendingCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Global keyboard shortcuts
   useGlobalHotkeys({

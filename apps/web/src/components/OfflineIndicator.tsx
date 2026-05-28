@@ -1,6 +1,6 @@
 import { WifiOff, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { syncPending } from '@/lib/offlineQueue';
+import { syncPending, type PendingOrderPayload } from '@/lib/offlineQueue';
 import { api } from '@/lib/api';
 
 interface Props {
@@ -13,7 +13,7 @@ export function OfflineIndicator({ online, pendingCount, onSynced }: Props) {
   if (online && pendingCount === 0) return null;
 
   async function handleSync() {
-    const submit = async (payload: Parameters<typeof syncPending>[0] extends (p: infer P) => unknown ? P : never) => {
+    await syncPending(async (payload: PendingOrderPayload) => {
       const { data: orderRes } = await api.post('/orders', {
         locationId: payload.locationId,
         sessionId: payload.sessionId,
@@ -25,8 +25,7 @@ export function OfflineIndicator({ online, pendingCount, onSynced }: Props) {
       const orderId: string = orderRes.data.id;
       await api.post(`/orders/${orderId}/complete`, { payments: payload.payments });
       return orderId;
-    };
-    await syncPending(submit as Parameters<typeof syncPending>[0]);
+    });
     onSynced?.();
   }
 

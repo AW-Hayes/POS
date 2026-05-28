@@ -39,39 +39,47 @@ function openDB(): Promise<IDBDatabase> {
 
 export async function enqueueOrder(payload: PendingOrderPayload): Promise<string> {
   const db = await openDB();
-  const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const record: PendingOrder = { localId, queuedAt: new Date().toISOString(), payload, retries: 0 };
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    const req = tx.objectStore(STORE).put(record);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-  db.close();
-  return localId;
+  try {
+    const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const record: PendingOrder = { localId, queuedAt: new Date().toISOString(), payload, retries: 0 };
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const req = tx.objectStore(STORE).put(record);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+    return localId;
+  } finally {
+    db.close();
+  }
 }
 
 export async function listPending(): Promise<PendingOrder[]> {
   const db = await openDB();
-  const result = await new Promise<PendingOrder[]>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).getAll();
-    req.onsuccess = () => resolve(req.result as PendingOrder[]);
-    req.onerror = () => reject(req.error);
-  });
-  db.close();
-  return result;
+  try {
+    return await new Promise<PendingOrder[]>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).getAll();
+      req.onsuccess = () => resolve(req.result as PendingOrder[]);
+      req.onerror = () => reject(req.error);
+    });
+  } finally {
+    db.close();
+  }
 }
 
 export async function removePending(localId: string): Promise<void> {
   const db = await openDB();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    const req = tx.objectStore(STORE).delete(localId);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-  db.close();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const req = tx.objectStore(STORE).delete(localId);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } finally {
+    db.close();
+  }
 }
 
 export async function syncPending(

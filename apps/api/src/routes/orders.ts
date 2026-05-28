@@ -61,7 +61,7 @@ const createOrderSchema = z.object({
     productId: z.string().optional(),
     variantId: z.string().optional(),
     name: z.string().optional(),   // required when productId is absent (misc item)
-    price: z.number().optional(),  // required when productId is absent (misc item)
+    price: z.number().min(0).optional(),  // required when productId is absent (misc item)
     quantity: z.number().int().positive(),
     discount: z.number().min(0).default(0),
   })).min(1),

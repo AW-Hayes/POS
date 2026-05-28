@@ -35,7 +35,9 @@ const ALIGN_RIGHT = `${ESC}a\x02`;
 const DOUBLE_HEIGHT_ON = `${ESC}!\x10`;
 const DOUBLE_HEIGHT_OFF = `${ESC}!\x00`;
 const CUT = `${GS}V\x41\x03`; // partial cut
-const CASH_DRAWER_PIN2 = `${ESC}p\x00\x19\xFA`;
+// Raw bytes — NOT a string. \xFA (250) is > 127, so passing it through TextEncoder
+// would produce the 2-byte UTF-8 sequence 0xC3 0xBA instead of the required raw 0xFA.
+const CASH_DRAWER_PIN2_BYTES = new Uint8Array([0x1b, 0x70, 0x00, 0x19, 0xfa]);
 
 function pad(left: string, right: string, width: number): string {
   const gap = width - left.length - right.length;
@@ -123,7 +125,7 @@ export async function openCashDrawer(config: PrinterConfig): Promise<void> {
       await invoke('print_to_printer', {
         host: config.host,
         port: config.port ?? 9100,
-        data: Array.from(new TextEncoder().encode(CASH_DRAWER_PIN2)),
+        data: Array.from(CASH_DRAWER_PIN2_BYTES),
       });
     } catch {
       // Tauri not available
@@ -133,9 +135,11 @@ export async function openCashDrawer(config: PrinterConfig): Promise<void> {
 
 function browserPrint(escposData: string): void {
   // Convert ESC/POS to readable plain text for browser print fallback
-  const text = escposData
+  const raw = escposData
     .replace(/[\x1B\x1D][\s\S]/g, '') // strip control sequences
     .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, ''); // strip other non-printable
+  // HTML-escape so product names with < > & don't break the print window
+  const text = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const win = window.open('', '_blank', 'width=320,height=600,scrollbars=yes');
   if (!win) return;
   win.document.write(`
