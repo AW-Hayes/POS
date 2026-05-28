@@ -33,8 +33,12 @@ if not exist "%EXE%" (
 echo.
 echo  Starting API server...
 start "RetailOS API" cmd /k "npm run dev -w apps/api"
-echo  Waiting for API to start...
-timeout /t 4 /nobreak >nul
+echo  Waiting for API to be ready...
+:wait_api
+timeout /t 1 /nobreak >nul
+curl -s http://localhost:3001/health >nul 2>&1
+if %errorlevel% neq 0 goto :wait_api
+echo  API is ready.
 echo  Launching RetailOS...
 start "" "%EXE%"
 goto :end
@@ -44,8 +48,12 @@ goto :end
 echo.
 echo  Starting API server...
 start "RetailOS API" cmd /k "npm run dev -w apps/api"
-echo  Waiting for API to start...
-timeout /t 3 /nobreak >nul
+echo  Waiting for API to be ready...
+:wait_api_dev
+timeout /t 1 /nobreak >nul
+curl -s http://localhost:3001/health >nul 2>&1
+if %errorlevel% neq 0 goto :wait_api_dev
+echo  API is ready.
 echo  Starting Tauri dev window (hot reload)...
 npm run desktop:dev -w apps/web
 goto :end
