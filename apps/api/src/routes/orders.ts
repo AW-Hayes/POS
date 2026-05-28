@@ -57,6 +57,8 @@ const createOrderSchema = z.object({
   customerId: z.string().optional(),
   notes: z.string().optional(),
   promotionIds: z.array(z.string()).default([]),
+  giftReceipt: z.boolean().default(false),
+  managerOverride: z.object({ userId: z.string(), pin: z.string() }).optional(),
   items: z.array(z.object({
     productId: z.string().optional(),
     variantId: z.string().optional(),
@@ -79,6 +81,27 @@ ordersRouter.post('/', async (req, res, next) => {
     const tenant = await prisma.tenant.findUnique({ where: { id: req.user!.tenantId } });
     const tenantSettings = tenant?.settings as Record<string, unknown>;
     const defaultTaxRate = Number(tenantSettings?.taxRate ?? 0);
+
+    // Validate manager override if any item exceeds the discount threshold
+    const discountThresholdPct = Number(tenantSettings?.discountThresholdPct ?? 100);
+    const maxItemDiscountPct = data.items.reduce((max, item) => {
+      if (!item.price || item.price === 0) return max;
+      return Math.max(max, (item.discount / item.price) * 100);
+    }, 0);
+    if (maxItemDiscountPct > discountThresholdPct) {
+      if (!data.managerOverride) {
+        throw new AppError(403, `Discount exceeds threshold (${discountThresholdPct}%) — manager override required`);
+      }
+      const manager = await prisma.user.findFirst({
+        where: { id: data.managerOverride.userId, tenantId: req.user!.tenantId, active: true },
+      });
+      if (!manager || !['admin', 'manager'].includes(manager.role)) {
+        throw new AppError(403, 'Manager override: user not found or insufficient role');
+      }
+      const bcrypt = await import('bcryptjs');
+      const pinValid = manager.pin ? await bcrypt.compare(data.managerOverride.pin, manager.pin) : data.managerOverride.pin === manager.pin;
+      if (!pinValid) throw new AppError(403, 'Manager override: incorrect PIN');
+    }
 
     const productIds = [...new Set(data.items.filter((i) => i.productId).map((i) => i.productId as string))];
     const products = await prisma.product.findMany({
@@ -235,6 +258,7 @@ ordersRouter.post('/', async (req, res, next) => {
         userId: req.user!.userId,
         customerId: beforeCtx.payload.customerId,
         notes: beforeCtx.payload.notes,
+        giftReceipt: data.giftReceipt,
         status: 'open',
         subtotal: beforeCtx.payload.subtotal,
         taxAmount: beforeCtx.payload.taxAmount,

@@ -82,17 +82,19 @@ model RegisterSession {
 // ─── Users & Auth ─────────────────────────────────────────────────────────────
 
 model User {
-  id           String   @id @default(cuid())
-  tenantId     String
-  email        String
-  name         String
-  passwordHash String?
-  pin          String?
-  role         String   @default("cashier")
-  commissionRate Float?
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                String    @id @default(cuid())
+  tenantId          String
+  email             String
+  name              String
+  passwordHash      String?
+  pin               String?
+  role              String    @default("cashier")
+  commissionRate    Float?
+  active            Boolean   @default(true)
+  resetToken        String?
+  resetTokenExpiry  DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   sessions             RegisterSession[]
@@ -105,6 +107,7 @@ model User {
   cashDrops            CashDrop[]
   loyaltyTransactions  LoyaltyTransaction[]
   timeEntries          TimeEntry[]
+  auditLogs            AuditLog[]
 
   @@unique([tenantId, email])
 }
@@ -304,11 +307,13 @@ model Order {
   taxAmount         Float     @default(0)
   discountAmount    Float     @default(0)
   promotionDiscount Float     @default(0)
+  tipAmount         Float     @default(0)
   total             Float
   notes             String?
   heldName          String?
   estimateExpiresAt DateTime?
   salespersonId     String?
+  giftReceipt       Boolean   @default(false)
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   completedAt       DateTime?
@@ -739,4 +744,25 @@ model TimeEntry {
 
   @@index([userId])
   @@index([tenantId])
+}
+
+// ─── Audit Log ────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String?
+  userEmail String?
+  action    String
+  entity    String
+  entityId  String?
+  summary   String?
+  changes   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([entity, entityId])
 }

@@ -4,7 +4,7 @@ import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/utils';
-import { Minus, Plus, Trash2, Tag, X, ChevronDown } from 'lucide-react';
+import { Minus, Plus, Trash2, Tag, X, ChevronDown, Gift } from 'lucide-react';
 import type { StepProps, CartItem } from '../types';
 
 interface Promotion {
@@ -20,6 +20,9 @@ export function CartReviewStep({ state, onAdvance, onAbort }: StepProps) {
   const [promoSearch, setPromoSearch] = useState('');
   const [selectedPromos, setSelectedPromos] = useState<Promotion[]>(
     (state.meta.selectedPromos as Promotion[]) ?? [],
+  );
+  const [giftReceipt, setGiftReceipt] = useState<boolean>(
+    (state.meta.giftReceipt as boolean) ?? false,
   );
 
   const { data: promotionsData } = useQuery({
@@ -68,6 +71,7 @@ export function CartReviewStep({ state, onAdvance, onAbort }: StepProps) {
         ...state.meta,
         promotionIds: selectedPromos.map((p) => p.id),
         selectedPromos,
+        giftReceipt,
       },
     });
   }
@@ -190,6 +194,21 @@ export function CartReviewStep({ state, onAdvance, onAbort }: StepProps) {
           </div>
         )}
       </div>
+
+      {/* Gift receipt toggle */}
+      <button
+        type="button"
+        onClick={() => setGiftReceipt((v) => !v)}
+        className={`w-full flex items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors ${giftReceipt ? 'border-primary bg-primary/5 text-primary' : 'border-input hover:bg-muted/50'}`}
+      >
+        <span className="flex items-center gap-2">
+          <Gift className="h-4 w-4" />
+          Gift receipt (hide prices)
+        </span>
+        <div className={`h-5 w-9 rounded-full transition-colors relative ${giftReceipt ? 'bg-primary' : 'bg-muted'}`}>
+          <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${giftReceipt ? 'translate-x-4' : 'translate-x-0.5'}`} />
+        </div>
+      </button>
 
       <div className="flex gap-3 pt-2">
         <Button variant="outline" className="flex-1" onClick={onAbort}>

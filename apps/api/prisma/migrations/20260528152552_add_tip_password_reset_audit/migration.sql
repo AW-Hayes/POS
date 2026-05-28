@@ -1,5 +1,6 @@
 -- AlterTable
-ALTER TABLE "Order" ADD COLUMN     "tipAmount" DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE "Order" ADD COLUMN     "tipAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "giftReceipt" BOOLEAN NOT NULL DEFAULT false;
 
 -- AlterTable
 ALTER TABLE "User" ADD COLUMN     "resetToken" TEXT,

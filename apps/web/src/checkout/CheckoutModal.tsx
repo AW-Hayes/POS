@@ -78,6 +78,7 @@ export function CheckoutModal({
         customerId: hooked.customerId,
         notes: hooked.meta.notes as string | undefined,
         promotionIds: (hooked.meta.promotionIds as string[] | undefined) ?? [],
+        giftReceipt: (hooked.meta.giftReceipt as boolean | undefined) ?? false,
         items: hooked.cart.map((item) => ({
           ...(item.productId ? { productId: item.productId } : {}),
           variantId: item.variantId,

@@ -14,43 +14,28 @@ function buildReceiptHtml(order: {
   subtotal: number;
   taxAmount: number;
   discountAmount: number;
+  giftReceipt?: boolean;
   completedAt: Date | null;
   items: Array<{ name: string; quantity: number; price: number; discount: number; total: number }>;
   payments: Array<{ method: string; amount: number }>;
   customer?: { name: string; email?: string | null } | null;
 }, tenantName: string, receiptFooter?: string) {
+  const gift = order.giftReceipt ?? false;
   const date = order.completedAt ? new Date(order.completedAt).toLocaleString() : new Date().toLocaleString();
+
   const items = order.items.map(i => `
     <tr>
       <td style="padding:4px 8px">${i.name}</td>
       <td style="padding:4px 8px;text-align:center">${i.quantity}</td>
-      <td style="padding:4px 8px;text-align:right">$${i.price.toFixed(2)}</td>
-      <td style="padding:4px 8px;text-align:right">$${i.total.toFixed(2)}</td>
+      ${gift ? '' : `<td style="padding:4px 8px;text-align:right">$${i.price.toFixed(2)}</td>`}
+      ${gift ? '' : `<td style="padding:4px 8px;text-align:right">$${i.total.toFixed(2)}</td>`}
     </tr>`).join('');
 
   const payments = order.payments.map(p =>
     `<tr><td style="padding:2px 8px">${p.method}</td><td style="padding:2px 8px;text-align:right">$${p.amount.toFixed(2)}</td></tr>`
   ).join('');
 
-  return `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>Receipt</title></head>
-<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
-  <h1 style="text-align:center;margin-bottom:4px">${tenantName}</h1>
-  <p style="text-align:center;color:#666;margin-top:0">${date}</p>
-  <p style="text-align:center;color:#666">Order #${order.id.slice(-8).toUpperCase()}</p>
-  ${order.customer ? `<p style="text-align:center">Thank you, ${order.customer.name}!</p>` : ''}
-  <table style="width:100%;border-collapse:collapse;margin:16px 0">
-    <thead>
-      <tr style="border-bottom:1px solid #ccc">
-        <th style="padding:4px 8px;text-align:left">Item</th>
-        <th style="padding:4px 8px;text-align:center">Qty</th>
-        <th style="padding:4px 8px;text-align:right">Price</th>
-        <th style="padding:4px 8px;text-align:right">Total</th>
-      </tr>
-    </thead>
-    <tbody>${items}</tbody>
-  </table>
+  const totalsSection = gift ? '' : `
   <table style="width:100%;border-collapse:collapse;margin:8px 0">
     <tr><td style="padding:2px 8px">Subtotal</td><td style="padding:2px 8px;text-align:right">$${order.subtotal.toFixed(2)}</td></tr>
     ${order.discountAmount > 0 ? `<tr><td style="padding:2px 8px">Discount</td><td style="padding:2px 8px;text-align:right">-$${order.discountAmount.toFixed(2)}</td></tr>` : ''}
@@ -60,7 +45,30 @@ function buildReceiptHtml(order: {
   <table style="width:100%;border-collapse:collapse;margin:8px 0">
     <tr><td colspan="2" style="padding:4px 8px;color:#666">Payment</td></tr>
     ${payments}
+  </table>`;
+
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>${gift ? 'Gift Receipt' : 'Receipt'}</title></head>
+<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
+  <h1 style="text-align:center;margin-bottom:4px">${tenantName}</h1>
+  ${gift ? '<p style="text-align:center;font-weight:bold;color:#555">GIFT RECEIPT</p>' : ''}
+  <p style="text-align:center;color:#666;margin-top:0">${date}</p>
+  <p style="text-align:center;color:#666">Order #${order.id.slice(-8).toUpperCase()}</p>
+  ${order.customer ? `<p style="text-align:center">Thank you, ${order.customer.name}!</p>` : ''}
+  <table style="width:100%;border-collapse:collapse;margin:16px 0">
+    <thead>
+      <tr style="border-bottom:1px solid #ccc">
+        <th style="padding:4px 8px;text-align:left">Item</th>
+        <th style="padding:4px 8px;text-align:center">Qty</th>
+        ${gift ? '' : '<th style="padding:4px 8px;text-align:right">Price</th>'}
+        ${gift ? '' : '<th style="padding:4px 8px;text-align:right">Total</th>'}
+      </tr>
+    </thead>
+    <tbody>${items}</tbody>
   </table>
+  ${totalsSection}
+  ${gift ? '<p style="text-align:center;color:#888;font-size:12px;margin-top:16px">No price information on this receipt</p>' : ''}
   ${receiptFooter ? `<p style="text-align:center;color:#888;font-size:12px;margin-top:24px">${receiptFooter}</p>` : ''}
 </body>
 </html>`;
@@ -75,11 +83,7 @@ receiptsRouter.post('/orders/:orderId/email', async (req, res, next) => {
 
     const order = await prisma.order.findFirst({
       where: { id: req.params.orderId, tenantId: req.user!.tenantId },
-      include: {
-        items: true,
-        payments: true,
-        customer: { select: { name: true, email: true } },
-      },
+      select: { id: true, total: true, subtotal: true, taxAmount: true, discountAmount: true, giftReceipt: true, completedAt: true, items: true, payments: true, customer: { select: { name: true, email: true } } },
     });
     if (!order) throw new AppError(404, 'Order not found');
 
@@ -120,7 +124,7 @@ receiptsRouter.get('/orders/:orderId/print', async (req, res, next) => {
   try {
     const order = await prisma.order.findFirst({
       where: { id: req.params.orderId, tenantId: req.user!.tenantId },
-      include: { items: true, payments: true, customer: { select: { name: true, email: true } } },
+      select: { id: true, total: true, subtotal: true, taxAmount: true, discountAmount: true, giftReceipt: true, completedAt: true, items: true, payments: true, customer: { select: { name: true, email: true } } },
     });
     if (!order) throw new AppError(404, 'Order not found');
 
