@@ -17,9 +17,11 @@ import {
   Monitor, Tablet, List, BookOpen, CreditCard, Save,
   Building2, PlusCircle, Pencil, Trash2,
   Star, Settings, AlertCircle, Keyboard, RotateCcw, ToggleLeft, ToggleRight,
+  Printer, Wifi, WifiOff, Barcode,
 } from 'lucide-react';
 import { DEFAULT_HOTKEYS, loadHotkeyMap, saveHotkeyMap, resetHotkeyMap, eventToKey } from '@/lib/hotkeys';
 import { FEATURE_DEFS, getFeatureFlags } from '@/lib/features';
+import { loadPrinterConfig, savePrinterConfig, sendToPrinter, generateEscPos, openCashDrawer } from '@/lib/printer';
 import type { PaymentTerminalConfig } from '@pos/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -31,11 +33,12 @@ type Tenant = { id: string; name: string; slug: string; settings: Record<string,
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 
-type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard' | 'features';
+type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard' | 'features' | 'hardware';
 
 const allTabs: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'terminal',  label: 'Terminal' },
   { id: 'keyboard',  label: 'Keyboard' },
+  { id: 'hardware',  label: 'Hardware' },
   { id: 'general',   label: 'General',   adminOnly: true },
   { id: 'locations', label: 'Locations', adminOnly: true },
   { id: 'registers', label: 'Registers', adminOnly: true },
@@ -1218,6 +1221,186 @@ function KeyboardTab() {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+// ─── Hardware tab ────────────────────────────────────────────────────────────
+
+function HardwareTab() {
+  const [config, setConfig] = useState(() => loadPrinterConfig());
+  const [saved, setSaved] = useState(false);
+  const [testStatus, setTestStatus] = useState<string | null>(null);
+  const [scanValue, setScanValue] = useState('');
+
+  function save() {
+    savePrinterConfig(config);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function testPrint() {
+    setTestStatus('Printing…');
+    try {
+      const escpos = generateEscPos({
+        storeName: 'RetailOS',
+        orderId: 'TEST0001',
+        completedAt: new Date().toISOString(),
+        items: [{ name: 'Test Item', quantity: 1, price: 9.99, discount: 0 }],
+        subtotal: 9.99,
+        taxAmount: 0.80,
+        total: 10.79,
+        payments: [{ method: 'cash', amount: 11.00 }],
+        change: 0.21,
+        footer: '*** TEST PRINT ***',
+      }, config.charWidth ?? 42);
+      await sendToPrinter(escpos, config);
+      setTestStatus('Done');
+    } catch (e) {
+      setTestStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    setTimeout(() => setTestStatus(null), 3000);
+  }
+
+  async function testDrawer() {
+    setTestStatus('Opening drawer…');
+    try {
+      await openCashDrawer(config);
+      setTestStatus('Signal sent');
+    } catch (e) {
+      setTestStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    setTimeout(() => setTestStatus(null), 3000);
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Receipt Printer */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Printer className="h-5 w-5" /> Receipt Printer
+          </CardTitle>
+          <CardDescription>
+            Configure the thermal receipt printer for this device. Network printers use ESC/POS over TCP (port 9100).
+            Browser Print uses the OS print dialog as a fallback.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Printer Type</label>
+            <select
+              className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+              value={config.type ?? 'browser'}
+              onChange={(e) => setConfig((c) => ({ ...c, type: e.target.value as 'network' | 'browser' }))}
+            >
+              <option value="browser">Browser Print (OS dialog)</option>
+              <option value="network">Network (ESC/POS TCP) — requires Tauri app</option>
+            </select>
+          </div>
+
+          {config.type === 'network' && (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2 space-y-1.5">
+                  <label className="text-sm font-medium">Printer IP Address</label>
+                  <Input
+                    placeholder="192.168.1.100"
+                    value={config.host ?? ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, host: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Port</label>
+                  <Input
+                    type="number"
+                    placeholder="9100"
+                    value={config.port ?? 9100}
+                    onChange={(e) => setConfig((c) => ({ ...c, port: Number(e.target.value) }))}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Paper Width</label>
+            <select
+              className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+              value={config.charWidth ?? 42}
+              onChange={(e) => setConfig((c) => ({ ...c, charWidth: Number(e.target.value) as 32 | 42 }))}
+            >
+              <option value={32}>58mm paper (32 chars)</option>
+              <option value={42}>80mm paper (42 chars)</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3 pt-2">
+            <Button onClick={save}>Save</Button>
+            <Button variant="outline" onClick={testPrint} disabled={testStatus === 'Printing…'}>
+              <Printer className="h-4 w-4 mr-1.5" />
+              Test Print
+            </Button>
+            <SavedBadge saved={saved} />
+            {testStatus && <span className="text-sm text-muted-foreground">{testStatus}</span>}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Cash Drawer */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <span className="text-lg">💰</span> Cash Drawer
+          </CardTitle>
+          <CardDescription>
+            Cash drawers are triggered via an ESC/POS pulse through the receipt printer. Configure the printer above first.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" onClick={testDrawer} disabled={testStatus === 'Opening drawer…'}>
+            Test Open Drawer
+          </Button>
+          {testStatus?.includes('drawer') && (
+            <span className="ml-3 text-sm text-muted-foreground">{testStatus}</span>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Barcode Scanner */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Barcode className="h-5 w-5" /> Barcode Scanner
+          </CardTitle>
+          <CardDescription>
+            Most barcode scanners work as keyboard wedge devices (HID) — they type the barcode value followed by Enter.
+            No configuration is required; just plug in and scan.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm font-medium">Test Scan</p>
+          <p className="text-xs text-muted-foreground">
+            Click the field below, then scan a barcode. The decoded value will appear here.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              placeholder="Scan a barcode here…"
+              value={scanValue}
+              onChange={(e) => setScanValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+              className="font-mono"
+            />
+            <Button variant="outline" onClick={() => setScanValue('')}>Clear</Button>
+          </div>
+          {scanValue && (
+            <div className="flex items-center gap-2 text-sm text-green-600">
+              <Barcode className="h-4 w-4" />
+              Scanned: <span className="font-mono font-medium">{scanValue}</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ─── Features tab ────────────────────────────────────────────────────────────
 
 const FEATURE_GROUPS = ['Sales', 'Catalog', 'Customers', 'Procurement', 'Team'] as const;
@@ -1349,6 +1532,7 @@ export function SettingsPage() {
       {/* Tab content */}
       {tab === 'terminal'  && <TerminalTab />}
       {tab === 'keyboard'  && <KeyboardTab />}
+      {tab === 'hardware'  && <HardwareTab />}
       {tab === 'general'   && isAdmin && <GeneralTab />}
       {tab === 'locations' && isAdmin && <LocationsTab />}
       {tab === 'registers' && isAdmin && <RegistersTab />}

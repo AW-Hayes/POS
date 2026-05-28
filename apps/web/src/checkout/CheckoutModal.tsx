@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
 import { cn } from '@/lib/utils';
+import { enqueueOrder } from '@/lib/offlineQueue';
 import { pipelineRegistry } from './registry';
 import type { CheckoutState, CartItem } from './types';
 
@@ -50,8 +51,7 @@ export function CheckoutModal({
       // ── pipeline:before-submit hook ────────────────────────────────────────
       const hooked = await pipelineRegistry.runHook('pipeline:before-submit', finalState);
 
-      // Create the order
-      const { data: orderRes } = await api.post('/orders', {
+      const orderPayload = {
         locationId: hooked.locationId,
         sessionId: hooked.sessionId,
         customerId: hooked.customerId,
@@ -65,8 +65,18 @@ export function CheckoutModal({
           quantity: item.quantity,
           discount: item.discount,
         })),
-      });
+      };
 
+      // Offline: queue locally and continue to receipt step
+      if (!navigator.onLine) {
+        const localId = await enqueueOrder({ ...orderPayload, payments: hooked.payments });
+        const orderId = `offline:${localId}`;
+        await pipelineRegistry.runHook('pipeline:after-submit', { ...hooked, orderId });
+        return orderId;
+      }
+
+      // Create the order
+      const { data: orderRes } = await api.post('/orders', orderPayload);
       const orderId: string = orderRes.data.id;
 
       // Complete the order with payments

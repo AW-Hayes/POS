@@ -17,7 +17,10 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { KeyboardShortcutsHelp } from '@/components/KeyboardShortcutsHelp';
+import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { useGlobalHotkeys } from '@/hooks/useGlobalHotkeys';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { syncPending } from '@/lib/offlineQueue';
 import {
   LayoutDashboard, ShoppingCart, Package, Warehouse, ClipboardList,
   Users, Settings, LogOut, ShoppingBag, BarChart3, Building2,
@@ -413,6 +416,30 @@ export function DashboardLayout() {
     navigate('/login');
   }
 
+  const { online, pendingCount } = useOnlineStatus();
+
+  const syncMutation = useMutation({
+    mutationFn: () =>
+      syncPending(async (payload) => {
+        const { data: orderRes } = await api.post('/orders', {
+          locationId: payload.locationId,
+          sessionId: payload.sessionId,
+          customerId: payload.customerId,
+          notes: payload.notes,
+          promotionIds: payload.promotionIds,
+          items: payload.items,
+        });
+        const orderId: string = orderRes.data.id;
+        await api.post(`/orders/${orderId}/complete`, { payments: payload.payments });
+        return orderId;
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
+  });
+
+  // Auto-sync when coming back online
+  const wasOffline = !online;
+  if (online && wasOffline && pendingCount > 0) syncMutation.mutate();
+
   // Global keyboard shortcuts
   useGlobalHotkeys({
     onEod: openEod,
@@ -476,6 +503,7 @@ export function DashboardLayout() {
 
         {/* Right side */}
         <div className="ml-auto flex items-center gap-1">
+          <OfflineIndicator online={online} pendingCount={pendingCount} onSynced={() => queryClient.invalidateQueries({ queryKey: ['orders'] })} />
           {/* Session actions */}
           {sessionId && (
             <>

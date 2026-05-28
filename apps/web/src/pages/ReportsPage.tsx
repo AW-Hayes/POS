@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { BarChart3, TrendingUp, Package, CreditCard, Users, Printer, Clock, Percent, DollarSign, Receipt } from 'lucide-react';
+import { buildCSV, downloadCSV, isoToLocal } from '@/lib/exportUtils';
+import { BarChart3, TrendingUp, Package, CreditCard, Users, Printer, Clock, Percent, DollarSign, Receipt, Download } from 'lucide-react';
 
 interface SalesReport {
   orderCount: number;
@@ -80,7 +81,7 @@ interface TaxLiabilityReport {
   totals: { taxableAmount: number; taxCollected: number; orderCount: number };
 }
 
-type ReportTab = 'sales' | 'salesperson' | 'commissions' | 'employee' | 'tax-liability' | 'x-tape' | 'z-tape';
+type ReportTab = 'sales' | 'salesperson' | 'commissions' | 'employee' | 'tax-liability' | 'x-tape' | 'z-tape' | 'export';
 
 export function ReportsPage() {
   const today = new Date().toISOString().slice(0, 10);
@@ -171,6 +172,7 @@ export function ReportsPage() {
           { id: 'tax-liability', label: 'Tax Liability', icon: Receipt },
           { id: 'x-tape', label: 'X-Tape', icon: Clock },
           { id: 'z-tape', label: 'Z-Tape', icon: Printer },
+          { id: 'export', label: 'Export', icon: Download },
         ] as const).map(({ id, label, icon: Icon }) => (
           <Button key={id} size="sm" variant={tab === id ? 'default' : 'outline'} onClick={() => setTab(id)}>
             <Icon className="h-4 w-4 mr-1" />{label}
@@ -178,8 +180,8 @@ export function ReportsPage() {
         ))}
       </div>
 
-      {/* Date range (shared by sales + salesperson + employee + tax-liability + commissions) */}
-      {(tab === 'sales' || tab === 'salesperson' || tab === 'employee' || tab === 'tax-liability' || tab === 'commissions') && (
+      {/* Date range (shared by sales + salesperson + employee + tax-liability + commissions + export) */}
+      {(tab === 'sales' || tab === 'salesperson' || tab === 'employee' || tab === 'tax-liability' || tab === 'commissions' || tab === 'export') && (
         <div className="flex items-end gap-3">
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground font-medium">From</label>
@@ -499,6 +501,171 @@ export function ReportsPage() {
           )}
         </div>
       )}
+
+      {/* ── Export tab ──────────────────────────────────────────────────────── */}
+      {tab === 'export' && <ExportTab from={query.from} to={query.to} />}
+    </div>
+  );
+}
+
+interface OrderRow {
+  id: string;
+  createdAt: string;
+  completedAt?: string;
+  status: string;
+  subtotal: number;
+  discountAmount: number;
+  taxAmount: number;
+  total: number;
+  customer?: { name?: string; email?: string } | null;
+  items: Array<{ name: string; quantity: number; price: number; discount: number; taxRate: number }>;
+  payments: Array<{ method: string; amount: number }>;
+}
+
+function ExportTab({ from, to }: { from: string; to: string }) {
+  const [loading, setLoading] = useState<string | null>(null);
+
+  const fromISO = `${from}T00:00:00.000Z`;
+  const toISO = `${to}T23:59:59.999Z`;
+  const filename = (suffix: string) => `export_${from}_to_${to}_${suffix}.csv`;
+
+  async function fetchOrders(): Promise<OrderRow[]> {
+    const { data } = await api.get('/orders', {
+      params: { from: fromISO, to: toISO, status: 'completed', pageSize: 2000 },
+    });
+    return data.data as OrderRow[];
+  }
+
+  async function exportSalesJournal() {
+    setLoading('journal');
+    try {
+      const orders = await fetchOrders();
+      const headers = ['Date', 'Order ID', 'Customer', 'Subtotal', 'Discount', 'Tax', 'Total', 'Payment Methods'];
+      const rows = orders.map((o) => [
+        isoToLocal(o.completedAt ?? o.createdAt),
+        o.id.slice(-8).toUpperCase(),
+        o.customer?.name ?? '',
+        o.subtotal.toFixed(2),
+        o.discountAmount.toFixed(2),
+        o.taxAmount.toFixed(2),
+        o.total.toFixed(2),
+        o.payments.map((p) => `${p.method} $${p.amount.toFixed(2)}`).join('; '),
+      ]);
+      downloadCSV(buildCSV(headers, rows), filename('sales_journal'));
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function exportItemDetail() {
+    setLoading('items');
+    try {
+      const orders = await fetchOrders();
+      const headers = ['Date', 'Order ID', 'Item', 'Qty', 'Unit Price', 'Discount', 'Tax Rate', 'Line Total'];
+      const rows: (string | number)[][] = [];
+      for (const o of orders) {
+        for (const item of o.items) {
+          rows.push([
+            isoToLocal(o.completedAt ?? o.createdAt),
+            o.id.slice(-8).toUpperCase(),
+            item.name,
+            item.quantity,
+            item.price.toFixed(2),
+            item.discount.toFixed(2),
+            `${(item.taxRate * 100).toFixed(1)}%`,
+            ((item.price - item.discount) * item.quantity).toFixed(2),
+          ]);
+        }
+      }
+      downloadCSV(buildCSV(headers, rows), filename('item_detail'));
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function exportTaxReport() {
+    setLoading('tax');
+    try {
+      const { data } = await api.get('/reports/tax-liability', { params: { from: fromISO, to: toISO } });
+      const report = data.data as { rows: Array<{ taxRate: number; taxableAmount: number; taxCollected: number; orderCount: number }> };
+      const headers = ['Tax Rate', 'Taxable Amount', 'Tax Collected', 'Orders'];
+      const rows = report.rows.map((r) => [
+        `${(r.taxRate * 100).toFixed(2)}%`,
+        r.taxableAmount.toFixed(2),
+        r.taxCollected.toFixed(2),
+        r.orderCount,
+      ]);
+      downloadCSV(buildCSV(headers, rows), filename('tax_report'));
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function exportPaymentMethods() {
+    setLoading('payments');
+    try {
+      const { data } = await api.get('/reports/sales', { params: { from: fromISO, to: toISO } });
+      const report = data.data as SalesReport;
+      const headers = ['Payment Method', 'Total Amount', '% of Revenue'];
+      const total = report.totalRevenue || 1;
+      const rows = Object.entries(report.paymentBreakdown).map(([method, amount]) => [
+        method.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+        amount.toFixed(2),
+        `${((amount / total) * 100).toFixed(1)}%`,
+      ]);
+      downloadCSV(buildCSV(headers, rows), filename('payment_methods'));
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  const exports = [
+    {
+      id: 'journal',
+      label: 'Sales Journal',
+      description: 'One row per completed order — date, order ID, customer, subtotal, tax, total, payments.',
+      action: exportSalesJournal,
+    },
+    {
+      id: 'items',
+      label: 'Item Detail',
+      description: 'One row per line item across all orders — product, quantity, price, tax rate.',
+      action: exportItemDetail,
+    },
+    {
+      id: 'tax',
+      label: 'Tax Liability Report',
+      description: 'Tax collected grouped by tax rate, suitable for filing.',
+      action: exportTaxReport,
+    },
+    {
+      id: 'payments',
+      label: 'Payment Methods',
+      description: 'Revenue breakdown by payment method (cash, card, gift card, etc.).',
+      action: exportPaymentMethods,
+    },
+  ];
+
+  return (
+    <div className="space-y-3 max-w-xl">
+      {exports.map(({ id, label, description, action }) => (
+        <div key={id} className="border rounded-lg p-4 flex items-center justify-between gap-4">
+          <div>
+            <p className="font-medium text-sm">{label}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0 gap-1.5"
+            disabled={loading === id}
+            onClick={action}
+          >
+            <Download className="h-3.5 w-3.5" />
+            {loading === id ? 'Building…' : 'Download CSV'}
+          </Button>
+        </div>
+      ))}
     </div>
   );
 }

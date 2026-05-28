@@ -5,15 +5,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { CheckCircle, Printer, Mail, Check } from 'lucide-react';
+import { CheckCircle, Mail, Check, Printer, WifiOff } from 'lucide-react';
+import { sendToPrinter, loadPrinterConfig, generateEscPos } from '@/lib/printer';
 import type { StepProps } from '../types';
 import type { Order } from '@pos/types';
 
 export function ReceiptStep({ state, onAdvance }: StepProps) {
+  const isOfflineOrder = state.orderId?.startsWith('offline:');
+
   const { data: order } = useQuery({
     queryKey: ['orders', state.orderId],
     queryFn: () => api.get(`/orders/${state.orderId}`).then((r) => r.data.data as Order),
-    enabled: !!state.orderId,
+    enabled: !!state.orderId && !isOfflineOrder,
   });
 
   const [emailInput, setEmailInput] = useState('');
@@ -31,19 +34,36 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
 
   const customerEmail = (order?.customer as { email?: string | null } | undefined)?.email ?? undefined;
 
-  function handlePrint() {
-    window.print();
+  async function handlePrint() {
+    const config = loadPrinterConfig();
+    const receiptData = {
+      storeName: 'RetailOS',
+      orderId: state.orderId ?? 'OFFLINE',
+      completedAt: order?.completedAt ?? new Date().toISOString(),
+      items: state.cart.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price, discount: i.discount })),
+      subtotal,
+      taxAmount: order?.taxAmount ?? 0,
+      total: order?.total ?? subtotal,
+      payments: state.payments.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference })),
+      change: change > 0 ? change : undefined,
+    };
+    await sendToPrinter(generateEscPos(receiptData, config.charWidth ?? 42), config);
   }
 
   return (
     <div className="space-y-4">
       <div className="text-center space-y-1">
         <div className="flex justify-center">
-          <div className="rounded-full bg-green-100 p-3">
-            <CheckCircle className="h-8 w-8 text-green-600" />
+          <div className={`rounded-full p-3 ${isOfflineOrder ? 'bg-amber-100' : 'bg-green-100'}`}>
+            {isOfflineOrder
+              ? <WifiOff className="h-8 w-8 text-amber-600" />
+              : <CheckCircle className="h-8 w-8 text-green-600" />}
           </div>
         </div>
-        <p className="font-semibold text-lg">Order Complete</p>
+        <p className="font-semibold text-lg">{isOfflineOrder ? 'Saved Offline' : 'Order Complete'}</p>
+        {isOfflineOrder && (
+          <p className="text-xs text-amber-600">This order will sync automatically when back online.</p>
+        )}
         {order && (
           <p className="text-xs text-muted-foreground font-mono">
             #{order.id.slice(-8).toUpperCase()}
