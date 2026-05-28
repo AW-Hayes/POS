@@ -16,6 +16,7 @@ import { CartReviewStep } from './steps/CartReviewStep';
 import { CustomerStep } from './steps/CustomerStep';
 import { AgeVerificationStep } from './steps/AgeVerificationStep';
 import { NotesStep } from './steps/NotesStep';
+import { TipStep } from './steps/TipStep';
 import { PaymentStep } from './steps/PaymentStep';
 import { ReceiptStep } from './steps/ReceiptStep';
 import { CashPayment } from './payments/CashPayment';
@@ -61,6 +62,7 @@ export function initCheckout(): void {
     condition: (state) => state.cart.some((i) => i.requiresAgeVerification),
   });
   pipelineRegistry.insertStep({ id: 'notes',        label: 'Notes',    component: NotesStep });
+  pipelineRegistry.insertStep({ id: 'tip',         label: 'Tip',      component: TipStep });
   pipelineRegistry.insertStep({ id: 'payment',     label: 'Payment',  component: PaymentStep });
   pipelineRegistry.insertStep({ id: 'receipt',     label: 'Receipt',  component: ReceiptStep });
 

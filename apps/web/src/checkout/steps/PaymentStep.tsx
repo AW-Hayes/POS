@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { formatCurrency } from '@/lib/utils';
-import { CreditCard, Banknote, Check } from 'lucide-react';
+import { CreditCard, Check } from 'lucide-react';
 import { paymentMethodRegistry } from '../registry';
 import type { StepProps, PaymentEntry } from '../types';
 
@@ -12,34 +11,17 @@ export function PaymentStep({ state, onAdvance, onBack }: StepProps) {
   const [collectedPayments, setCollectedPayments] = useState<PaymentEntry[]>(
     state.payments ?? [],
   );
-  const [tipAmount, setTipAmount] = useState<number>(0);
-  const [customTipInput, setCustomTipInput] = useState('');
-  const [showCustomTip, setShowCustomTip] = useState(false);
 
   const methods = paymentMethodRegistry.getAll();
   const activeMethod = methods.find((m) => m.id === activeMethodId);
 
   const subtotal = state.cart.reduce((s, i) => s + (i.price - i.discount) * i.quantity, 0);
+  const tipAmount = (state.meta.tipAmount as number) ?? 0;
   const grandTotal = subtotal + tipAmount;
   const totalPaid = collectedPayments.reduce((s, p) => s + p.amount, 0);
   const amountDue = Math.max(0, grandTotal - totalPaid);
   const change = Math.max(0, totalPaid - grandTotal);
   const isPaid = totalPaid >= grandTotal;
-
-  function selectTip(pct: number | 'custom') {
-    if (pct === 'custom') {
-      setShowCustomTip(true);
-    } else {
-      setTipAmount(Math.round(subtotal * pct) / 100);
-      setShowCustomTip(false);
-    }
-  }
-
-  function applyCustomTip() {
-    const val = parseFloat(customTipInput);
-    if (!isNaN(val) && val >= 0) setTipAmount(val);
-    setShowCustomTip(false);
-  }
 
   function handleCollected(entry: PaymentEntry) {
     setCollectedPayments((prev) => [...prev, entry]);
@@ -51,7 +33,7 @@ export function PaymentStep({ state, onAdvance, onBack }: StepProps) {
   }
 
   function handleConfirm() {
-    onAdvance({ payments: collectedPayments, meta: { ...state.meta, tipAmount } });
+    onAdvance({ payments: collectedPayments });
   }
 
   // If a payment method component is active, render it full-width
@@ -69,41 +51,6 @@ export function PaymentStep({ state, onAdvance, onBack }: StepProps) {
 
   return (
     <div className="space-y-4">
-      {/* Tip selection */}
-      <div className="rounded-lg bg-muted/40 p-3 space-y-2">
-        <p className="text-xs font-medium text-muted-foreground">Add a tip?</p>
-        <div className="flex gap-2 flex-wrap">
-          {([0, 15, 18, 20] as const).map((pct) => (
-            <Button
-              key={pct}
-              size="sm"
-              variant={tipAmount === (pct === 0 ? 0 : Math.round(subtotal * pct) / 100) && !showCustomTip ? 'default' : 'outline'}
-              onClick={() => pct === 0 ? (setTipAmount(0), setShowCustomTip(false)) : selectTip(pct)}
-            >
-              {pct === 0 ? 'None' : `${pct}%`}
-            </Button>
-          ))}
-          <Button size="sm" variant={showCustomTip ? 'default' : 'outline'} onClick={() => selectTip('custom')}>
-            Custom
-          </Button>
-        </div>
-        {showCustomTip && (
-          <div className="flex gap-2">
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              value={customTipInput}
-              onChange={(e) => setCustomTipInput(e.target.value)}
-              className="h-8 text-sm"
-            />
-            <Button size="sm" onClick={applyCustomTip}>Apply</Button>
-          </div>
-        )}
-        {tipAmount > 0 && <p className="text-xs text-muted-foreground">Tip: {formatCurrency(tipAmount)}</p>}
-      </div>
-
       {/* Amount summary */}
       <div className="rounded-lg bg-muted/40 p-4 space-y-1">
         <div className="flex justify-between text-sm">
