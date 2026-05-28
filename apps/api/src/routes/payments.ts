@@ -143,3 +143,96 @@ paymentsRouter.post('/square/cancel-checkout/:checkoutId', requireRole('admin', 
     next(err);
   }
 });
+
+// ─── Afterpay / Clearpay BNPL ─────────────────────────────────────────────────
+
+function afterpayConfig() {
+  const merchantId = process.env.AFTERPAY_MERCHANT_ID;
+  const secretKey = process.env.AFTERPAY_SECRET_KEY;
+  if (!merchantId || !secretKey) return null;
+  return { merchantId, secretKey, sandbox: process.env.AFTERPAY_SANDBOX !== 'false' };
+}
+
+function afterpayBase(sandbox: boolean) {
+  return sandbox ? 'https://global-api-sandbox.afterpay.com' : 'https://global-api.afterpay.com';
+}
+
+paymentsRouter.get('/afterpay/config', requireRole('admin', 'manager', 'cashier'), (_req, res) => {
+  const cfg = afterpayConfig();
+  res.json({ success: true, data: { configured: !!cfg, sandbox: cfg?.sandbox ?? true } });
+});
+
+paymentsRouter.post('/afterpay/create-checkout', requireRole('admin', 'manager', 'cashier'), async (req, res, next) => {
+  try {
+    const cfg = afterpayConfig();
+    if (!cfg) throw new AppError(400, 'Afterpay not configured — set AFTERPAY_MERCHANT_ID and AFTERPAY_SECRET_KEY');
+
+    const { amount } = z.object({ amount: z.number().positive() }).parse(req.body);
+    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173';
+    const basic = Buffer.from(`${cfg.merchantId}:${cfg.secretKey}`).toString('base64');
+
+    const apRes = await fetch(`${afterpayBase(cfg.sandbox)}/v2/checkouts`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/json', 'User-Agent': 'RetailOS/1.0' },
+      body: JSON.stringify({
+        amount: { amount: amount.toFixed(2), currency: 'USD' },
+        mode: 'express',
+        merchant: {
+          redirectConfirmUrl: `${frontendUrl}/afterpay/confirm`,
+          redirectCancelUrl: `${frontendUrl}/afterpay/cancel`,
+        },
+        items: [{ name: 'POS Sale', quantity: 1, price: { amount: amount.toFixed(2), currency: 'USD' } }],
+      }),
+    });
+
+    if (!apRes.ok) {
+      const errData = await apRes.json() as { message?: string };
+      throw new AppError(apRes.status, `Afterpay: ${errData.message ?? 'checkout failed'}`);
+    }
+
+    const data = await apRes.json() as { token: string; redirectCheckoutUrl: string };
+    res.json({ success: true, data: { token: data.token, redirectUrl: data.redirectCheckoutUrl } });
+  } catch (err) { next(err); }
+});
+
+paymentsRouter.get('/afterpay/checkout/:token', requireRole('admin', 'manager', 'cashier'), async (req, res, next) => {
+  try {
+    const cfg = afterpayConfig();
+    if (!cfg) throw new AppError(400, 'Afterpay not configured');
+
+    const basic = Buffer.from(`${cfg.merchantId}:${cfg.secretKey}`).toString('base64');
+    const apRes = await fetch(`${afterpayBase(cfg.sandbox)}/v2/checkouts/${req.params.token}`, {
+      headers: { Authorization: `Basic ${basic}`, 'User-Agent': 'RetailOS/1.0' },
+    });
+
+    if (!apRes.ok) throw new AppError(apRes.status, 'Failed to fetch Afterpay checkout');
+    const data = await apRes.json() as { status: string; token: string };
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+});
+
+paymentsRouter.post('/afterpay/capture/:token', requireRole('admin', 'manager', 'cashier'), async (req, res, next) => {
+  try {
+    const cfg = afterpayConfig();
+    if (!cfg) throw new AppError(400, 'Afterpay not configured');
+
+    const { amount } = z.object({ amount: z.number().positive() }).parse(req.body);
+    const basic = Buffer.from(`${cfg.merchantId}:${cfg.secretKey}`).toString('base64');
+
+    const apRes = await fetch(`${afterpayBase(cfg.sandbox)}/v2/payments/capture`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/json', 'User-Agent': 'RetailOS/1.0' },
+      body: JSON.stringify({ token: req.params.token, merchantReference: `POS-${Date.now()}` }),
+    });
+
+    if (!apRes.ok) {
+      const errData = await apRes.json() as { message?: string };
+      throw new AppError(apRes.status, `Afterpay capture: ${errData.message ?? 'failed'}`);
+    }
+
+    const data = await apRes.json() as { id: string; status: string };
+    if (data.status !== 'APPROVED') throw new AppError(400, `Afterpay payment ${data.status}`);
+
+    res.json({ success: true, data: { paymentId: data.id, amount } });
+  } catch (err) { next(err); }
+});

@@ -381,6 +381,15 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
       });
     });
 
+    // ── accounting: push to QuickBooks / Xero ─────────────────────────────────
+    {
+      const { pushOrderToQbo, pushOrderToXero } = await import('./integrations');
+      Promise.allSettled([
+        pushOrderToQbo(req.user!.tenantId, completed.id).catch(() => {}),
+        pushOrderToXero(req.user!.tenantId, completed.id).catch(() => {}),
+      ]);
+    }
+
     // ── hook: order:after-complete ─────────────────────────────────────────────
     await hooks.run('order:after-complete', {
       payload: { order: completed as Parameters<typeof hooks.run<'order:after-complete'>>[1]['payload']['order'] },
@@ -395,11 +404,7 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
         const pointsPerDollar = Number(loyaltySettings.loyaltyPointsPerDollar ?? 1);
         const earned = Math.floor(completed.total * pointsPerDollar);
         if (earned > 0) {
-          await prisma.$transaction([
-            prisma.customer.update({
-              where: { id: completed.customerId },
-              data: { loyaltyPoints: { increment: earned } },
-            }),
+          const [, updatedCustomer] = await prisma.$transaction([
             prisma.loyaltyTransaction.create({
               data: {
                 customerId: completed.customerId,
@@ -410,11 +415,25 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
                 note: `Earned on order ${completed.id.slice(-8).toUpperCase()}`,
               },
             }),
+            prisma.customer.update({
+              where: { id: completed.customerId },
+              data: { loyaltyPoints: { increment: earned } },
+              select: { loyaltyPoints: true },
+            }),
           ]);
+          // Non-blocking SMS loyalty notification
+          const { sendLoyaltyEarnedSms } = await import('./integrations');
+          sendLoyaltyEarnedSms(req.user!.tenantId, completed.customerId, earned, updatedCustomer.loyaltyPoints).catch(() => {});
         }
       } catch {
         // Never break order completion due to loyalty errors
       }
+    }
+
+    // ── SMS receipt ────────────────────────────────────────────────────────────
+    {
+      const { sendOrderReceiptSms } = await import('./integrations');
+      sendOrderReceiptSms(req.user!.tenantId, completed.id).catch(() => {});
     }
 
     res.json({ success: true, data: completed });

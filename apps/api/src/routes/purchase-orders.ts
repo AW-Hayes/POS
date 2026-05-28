@@ -12,8 +12,8 @@ const poInclude = {
   vendor: true,
   items: {
     include: {
-      product: { select: { id: true, name: true, sku: true } },
-      variant: { select: { id: true, sku: true } },
+      product: { select: { id: true, name: true, sku: true, barcode: true } },
+      variant: { select: { id: true, sku: true, barcode: true } },
     },
   },
 };

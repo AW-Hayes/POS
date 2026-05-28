@@ -17,8 +17,8 @@ export interface PurchaseOrderItem {
   purchaseOrderId: string;
   productId: string;
   variantId?: string;
-  product?: { id: string; name: string; sku?: string };
-  variant?: { id: string; sku?: string };
+  product?: { id: string; name: string; sku?: string; barcode?: string };
+  variant?: { id: string; sku?: string; barcode?: string };
   orderedQty: number;
   receivedQty: number;
   unitCost: number;

@@ -23,7 +23,8 @@ import { CardPayment } from './payments/CardPayment';
 import { LoyaltyPayment } from './payments/LoyaltyPayment';
 import { HouseAccountPayment } from './payments/HouseAccountPayment';
 import { GiftCardPayment } from './payments/GiftCardPayment';
-import { Banknote, CreditCard, Star, Building2, Gift } from 'lucide-react';
+import { BnplPayment } from './payments/BnplPayment';
+import { Banknote, CreditCard, Star, Building2, Gift, Smartphone } from 'lucide-react';
 import { api } from '@/lib/api';
 
 /**
@@ -69,6 +70,7 @@ export function initCheckout(): void {
   paymentMethodRegistry.register({ id: 'gift_card',     label: 'Gift Card',     icon: Gift,       component: GiftCardPayment });
   paymentMethodRegistry.register({ id: 'loyalty',       label: 'Loyalty Points', icon: Star,       component: LoyaltyPayment });
   paymentMethodRegistry.register({ id: 'house_account', label: 'House Account', icon: Building2,  component: HouseAccountPayment });
+  paymentMethodRegistry.register({ id: 'afterpay',      label: 'Afterpay',      icon: Smartphone, component: BnplPayment });
 
   // Earn loyalty points after every completed order that has a customer
   pipelineRegistry.on('pipeline:after-submit', async (state) => {
