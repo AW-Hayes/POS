@@ -123,11 +123,14 @@ async function main() {
     },
   });
 
-  await prisma.inventoryItem.upsert({
-    where: { locationId_productId_variantId: { locationId: location.id, productId: usb.id, variantId: null } },
-    update: {},
-    create: { locationId: location.id, productId: usb.id, quantity: 50, lowStockAt: 10 },
+  const usbItem = await prisma.inventoryItem.findFirst({
+    where: { locationId: location.id, productId: usb.id, variantId: null },
   });
+  if (!usbItem) {
+    await prisma.inventoryItem.create({
+      data: { locationId: location.id, productId: usb.id, quantity: 50, lowStockAt: 10 },
+    });
+  }
 
   const tshirt = await prisma.product.upsert({
     where: { tenantId_sku: { tenantId: tenant.id, sku: 'TSHIRT-BASIC' } },
