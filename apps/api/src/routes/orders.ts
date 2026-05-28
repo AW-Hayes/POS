@@ -387,6 +387,36 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
       meta: {},
     });
 
+    // ── loyalty: earn points ───────────────────────────────────────────────────
+    if (completed.customerId) {
+      try {
+        const tenantForLoyalty = await prisma.tenant.findUnique({ where: { id: req.user!.tenantId } });
+        const loyaltySettings = (tenantForLoyalty?.settings ?? {}) as Record<string, unknown>;
+        const pointsPerDollar = Number(loyaltySettings.loyaltyPointsPerDollar ?? 1);
+        const earned = Math.floor(completed.total * pointsPerDollar);
+        if (earned > 0) {
+          await prisma.$transaction([
+            prisma.customer.update({
+              where: { id: completed.customerId },
+              data: { loyaltyPoints: { increment: earned } },
+            }),
+            prisma.loyaltyTransaction.create({
+              data: {
+                customerId: completed.customerId,
+                userId: req.user!.userId,
+                orderId: completed.id,
+                type: 'earn',
+                points: earned,
+                note: `Earned on order ${completed.id.slice(-8).toUpperCase()}`,
+              },
+            }),
+          ]);
+        }
+      } catch {
+        // Never break order completion due to loyalty errors
+      }
+    }
+
     res.json({ success: true, data: completed });
   } catch (err) {
     next(err);

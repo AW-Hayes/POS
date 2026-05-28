@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { CheckCircle, Mail, Check, Printer, WifiOff, Gift } from 'lucide-react';
+import { CheckCircle, Mail, Check, Printer, WifiOff, Gift, Star } from 'lucide-react';
 import { sendToPrinter, loadPrinterConfig, generateEscPos, generateGiftReceipt } from '@/lib/printer';
 import type { StepProps } from '../types';
 import type { Order } from '@pos/types';
@@ -40,11 +40,15 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
 
   const customerEmail = (order?.customer as { email?: string | null } | undefined)?.email ?? undefined;
 
-  const settings = tenant?.settings as Record<string, string> | undefined;
+  const settings = tenant?.settings as Record<string, unknown> | undefined;
+
+  const hasCustomer = !!(order?.customer as { id?: string } | null | undefined)?.id;
+  const pointsPerDollar = Number(settings?.loyaltyPointsPerDollar ?? 1);
+  const loyaltyEarned = hasCustomer && order ? Math.floor(order.total * pointsPerDollar) : 0;
 
   function buildReceiptData() {
     return {
-      storeName: settings?.receiptStoreName ?? tenant?.name ?? 'RetailOS',
+      storeName: (settings?.receiptStoreName as string | undefined) ?? tenant?.name ?? 'RetailOS',
       orderId: state.orderId ?? 'OFFLINE',
       completedAt: order?.completedAt ?? new Date().toISOString(),
       items: state.cart.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price, discount: i.discount })),
@@ -54,11 +58,11 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
       total: order?.total ?? subtotal,
       payments: state.payments.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference })),
       change: change > 0 ? change : undefined,
-      storeAddress: settings?.receiptAddress,
-      storePhone: settings?.receiptPhone,
-      storeWebsite: settings?.receiptWebsite,
-      receiptHeader: settings?.receiptHeader,
-      footer: settings?.receiptFooter,
+      storeAddress: settings?.receiptAddress as string | undefined,
+      storePhone: settings?.receiptPhone as string | undefined,
+      storeWebsite: settings?.receiptWebsite as string | undefined,
+      receiptHeader: settings?.receiptHeader as string | undefined,
+      footer: settings?.receiptFooter as string | undefined,
     };
   }
 
@@ -155,6 +159,14 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
         <p className="text-xs text-center text-muted-foreground">
           {formatDate(order.completedAt)}
         </p>
+      )}
+
+      {/* Loyalty earned */}
+      {loyaltyEarned > 0 && (
+        <div className="flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+          <Star className="h-4 w-4 shrink-0 text-amber-500" />
+          <span><span className="font-semibold">+{loyaltyEarned} points</span> earned for this purchase</span>
+        </div>
       )}
 
       {/* Email receipt */}
