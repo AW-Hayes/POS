@@ -570,7 +570,9 @@ model CashDrop {
   id        String   @id @default(cuid())
   sessionId String
   userId    String
+  type      String   @default("drop") // "drop" | "paid_in" | "paid_out"
   amount    Float
+  reason    String?
   note      String?
   createdAt DateTime @default(now())
 

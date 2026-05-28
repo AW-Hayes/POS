@@ -8,7 +8,9 @@ export const cashDropsRouter = Router();
 cashDropsRouter.use(authenticate);
 
 const dropSchema = z.object({
+  type: z.enum(['drop', 'paid_in', 'paid_out']).default('drop'),
   amount: z.number().positive(),
+  reason: z.string().optional(),
   note: z.string().optional(),
 });
 
@@ -34,7 +36,7 @@ cashDropsRouter.get('/sessions/:sessionId', async (req, res, next) => {
 // Record a cash drop for a session
 cashDropsRouter.post('/sessions/:sessionId', async (req, res, next) => {
   try {
-    const { amount, note } = dropSchema.parse(req.body);
+    const { type, amount, reason, note } = dropSchema.parse(req.body);
 
     // Verify session belongs to a location this tenant owns
     const session = await prisma.registerSession.findFirst({
@@ -47,7 +49,7 @@ cashDropsRouter.post('/sessions/:sessionId', async (req, res, next) => {
     }
 
     const drop = await prisma.cashDrop.create({
-      data: { sessionId: session.id, userId: req.user!.userId, amount, note },
+      data: { sessionId: session.id, userId: req.user!.userId, type, amount, reason, note },
     });
     res.status(201).json({ success: true, data: drop });
   } catch (err) {
