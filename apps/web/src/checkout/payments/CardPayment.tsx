@@ -12,10 +12,14 @@ type TerminalStatus = 'idle' | 'connecting' | 'waiting' | 'processing' | 'approv
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type StripeTerminalInstance = any;
 
+const SQUARE_POLL_MS = 2000;
+
 export function CardPayment({ amountDue, onCollected, onCancel }: PaymentStepProps) {
   const [status, setStatus] = useState<TerminalStatus>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const terminalRef = useRef<StripeTerminalInstance>(null);
+  const squareCheckoutIdRef = useRef<string | null>(null);
+  const squarePollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: tenantData } = useQuery({
     queryKey: ['tenant', 'me'],
@@ -33,6 +37,15 @@ export function CardPayment({ amountDue, onCollected, onCancel }: PaymentStepPro
     : terminalConfig.provider === 'square'
     ? 'Square Terminal'
     : 'Manual';
+
+  // Auto-ready for Square Terminal (no browser SDK — just set waiting state)
+  useEffect(() => {
+    if (terminalConfig.provider !== 'square') return;
+    setStatus('waiting');
+    return () => {
+      if (squarePollRef.current) clearTimeout(squarePollRef.current);
+    };
+  }, [terminalConfig.provider]);
 
   // Auto-connect for Stripe Terminal
   useEffect(() => {
@@ -124,6 +137,67 @@ export function CardPayment({ amountDue, onCollected, onCancel }: PaymentStepPro
     }
   }
 
+  async function presentToSquareTerminal() {
+    setStatus('processing');
+    setErrorMsg(null);
+
+    try {
+      const createRes = await api.post('/payments/square/create-checkout', {
+        amount: amountDue,
+        sandbox: isSandbox,
+        ...(terminalConfig.readerIds?.[0] ? { deviceId: terminalConfig.readerIds[0] } : {}),
+      });
+      const checkoutId = createRes.data.data.checkoutId as string;
+      squareCheckoutIdRef.current = checkoutId;
+
+      const poll = () => {
+        squarePollRef.current = setTimeout(async () => {
+          try {
+            const pollRes = await api.get(`/payments/square/checkout/${checkoutId}`, {
+              params: { sandbox: String(isSandbox) },
+            });
+            const { status: squareStatus, paymentIds } = pollRes.data.data as { status: string; paymentIds?: string[] };
+
+            if (squareStatus === 'COMPLETED') {
+              setStatus('approved');
+              setTimeout(() => {
+                onCollected({ method: 'card', amount: amountDue, reference: paymentIds?.[0] ?? checkoutId });
+              }, 600);
+            } else if (squareStatus === 'CANCELED' || squareStatus === 'CANCEL_REQUESTED') {
+              setStatus('declined');
+              setErrorMsg('Payment cancelled on terminal');
+            } else if (squareStatus === 'FAILED') {
+              setStatus('error');
+              setErrorMsg('Terminal payment failed');
+            } else {
+              // Still PENDING or IN_PROGRESS — keep polling
+              poll();
+            }
+          } catch (err) {
+            setStatus('error');
+            setErrorMsg(err instanceof Error ? err.message : 'Polling error');
+          }
+        }, SQUARE_POLL_MS);
+      };
+      poll();
+    } catch (err) {
+      setStatus('error');
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to send to Square Terminal');
+    }
+  }
+
+  async function cancelSquareCheckout() {
+    const checkoutId = squareCheckoutIdRef.current;
+    if (!checkoutId) return;
+    if (squarePollRef.current) clearTimeout(squarePollRef.current);
+    try {
+      await api.post(`/payments/square/cancel-checkout/${checkoutId}`, { sandbox: isSandbox });
+    } catch { /* best-effort */ }
+    squareCheckoutIdRef.current = null;
+    setStatus('waiting');
+    setErrorMsg(null);
+  }
+
   function simulateApproval() {
     setStatus('processing');
     setTimeout(() => {
@@ -185,6 +259,18 @@ export function CardPayment({ amountDue, onCollected, onCancel }: PaymentStepPro
         {terminalConfig.provider === 'stripe' && status === 'waiting' && (
           <Button className="w-full" onClick={presentToTerminal}>
             Collect Payment
+          </Button>
+        )}
+
+        {terminalConfig.provider === 'square' && status === 'waiting' && (
+          <Button className="w-full" onClick={presentToSquareTerminal}>
+            Send to Terminal
+          </Button>
+        )}
+
+        {terminalConfig.provider === 'square' && status === 'processing' && (
+          <Button variant="outline" className="w-full" onClick={cancelSquareCheckout}>
+            Cancel
           </Button>
         )}
 

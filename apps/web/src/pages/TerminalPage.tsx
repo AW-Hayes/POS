@@ -13,6 +13,7 @@ import {
   Search, Plus, Minus, Trash2, Tablet,
   AlertCircle, List, Grid3x3, BookOpen, PauseCircle,
   FileText, DollarSign, PackagePlus, Monitor,
+  LogIn, LogOut, X,
 } from 'lucide-react';
 import type { Product } from '@pos/types';
 import { CheckoutModal } from '@/checkout';
@@ -30,7 +31,7 @@ interface HeldOrder {
 }
 
 export function TerminalPage() {
-  const { mode, setMode, locationId, sessionId, registerId } = useTerminalStore();
+  const { mode, setMode, locationId, sessionId, registerId, setRegister, setSession } = useTerminalStore();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -52,6 +53,15 @@ export function TerminalPage() {
   const [overridePin, setOverridePin] = useState('');
   const [overrideError, setOverrideError] = useState('');
   const [overridePending, setOverridePending] = useState(false);
+  // Register open/close
+  const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
+  const [openingCashInput, setOpeningCashInput] = useState('');
+  const [selectedRegisterId, setSelectedRegisterId] = useState('');
+  const [registerError, setRegisterError] = useState('');
+  const [eodOpen, setEodOpen] = useState(false);
+  const [closingCashInput, setClosingCashInput] = useState('');
+  const [eodSummary, setEodSummary] = useState<null | { orderCount: number; salesTotal: number; paymentTotals: Record<string, number>; expectedCash: number; cashDropsTotal: number }>(null);
+  const [eodStep, setEodStep] = useState<'summary' | 'confirm' | 'done'>('summary');
   const barcodeBuffer = useRef('');
   const barcodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -80,6 +90,36 @@ export function TerminalPage() {
   const { data: heldOrders } = useQuery<HeldOrder[]>({
     queryKey: ['orders', 'held'],
     queryFn: () => api.get('/held-orders').then((r) => r.data.data),
+  });
+
+  const { data: registers } = useQuery<Array<{ id: string; name: string; locationId: string; location: { id: string; name: string } }>>({
+    queryKey: ['registers'],
+    queryFn: () => api.get('/registers').then((r) => r.data.data),
+  });
+
+  const openRegisterMutation = useMutation({
+    mutationFn: ({ registerId, openingCash }: { registerId: string; openingCash: number }) =>
+      api.post(`/registers/${registerId}/open`, { openingCash }).then((r) => r.data.data as { id: string }),
+    onSuccess: (session, { registerId }) => {
+      const reg = registers?.find((r) => r.id === registerId);
+      if (reg) { setRegister(registerId, reg.locationId); }
+      setSession(session.id);
+      setRegisterDialogOpen(false);
+      setOpeningCashInput('');
+      setSelectedRegisterId('');
+      setRegisterError('');
+    },
+    onError: (err: unknown) => setRegisterError(err instanceof Error ? err.message : 'Failed to open register'),
+  });
+
+  const closeRegisterMutation = useMutation({
+    mutationFn: ({ registerId, closingCash }: { registerId: string; closingCash: number }) =>
+      api.post(`/registers/${registerId}/close`, { closingCash }).then((r) => r.data.data),
+    onSuccess: () => {
+      setSession(null);
+      setEodStep('done');
+    },
+    onError: (err: unknown) => setRegisterError(err instanceof Error ? err.message : 'Failed to close register'),
   });
 
   const { data: tenant } = useQuery({
@@ -229,6 +269,30 @@ export function TerminalPage() {
   const cartGP = revBasisTotal - costBasisTotal;
   const cartGPPct = revBasisTotal > 0 ? (cartGP / revBasisTotal) * 100 : 0;
 
+  // Load estimate from EstimatesPage "Convert to Order" flow
+  useEffect(() => {
+    const estimateId = localStorage.getItem('pos_load_estimate');
+    if (!estimateId) return;
+    localStorage.removeItem('pos_load_estimate');
+    api.get(`/estimates/${estimateId}`).then((r) => {
+      const est = r.data.data;
+      if (!est?.items?.length) return;
+      setCart(
+        est.items.map((item: { productId?: string; variantId?: string; name: string; sku?: string; price: number; discount: number; quantity: number }) => ({
+          productId: item.productId ?? '',
+          variantId: item.variantId,
+          name: item.name,
+          sku: item.sku,
+          price: item.price,
+          listPrice: item.price,
+          quantity: item.quantity,
+          discount: item.discount ?? 0,
+        })),
+      );
+    }).catch(() => { /* silently ignore stale estimate IDs */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function handleOrderComplete(total?: number) {
     const ch = new BroadcastChannel('pos-display');
     ch.postMessage({ type: 'complete', total: total ?? subtotal });
@@ -236,6 +300,20 @@ export function TerminalPage() {
     setCart([]);
     queryClient.invalidateQueries({ queryKey: ['orders'] });
     queryClient.invalidateQueries({ queryKey: ['inventory'] });
+  }
+
+  async function openEod() {
+    setEodSummary(null);
+    setEodStep('summary');
+    setClosingCashInput('');
+    setRegisterError('');
+    setEodOpen(true);
+    if (registerId) {
+      try {
+        const res = await api.get(`/registers/${registerId}/session-summary`);
+        setEodSummary(res.data.data);
+      } catch { /* summary unavailable */ }
+    }
   }
 
   function openCustomerDisplay() {
@@ -524,19 +602,32 @@ export function TerminalPage() {
           <span>Order</span>
           <div className="flex items-center gap-2">
             {!locationId && (
-              <span className="flex items-center gap-1 text-xs font-normal text-amber-600">
-                <AlertCircle className="h-3 w-3" />
-                No register
-              </span>
+              <button
+                className="flex items-center gap-1 text-xs font-normal text-amber-600 hover:text-amber-500"
+                title="Open register"
+                onClick={() => { setSelectedRegisterId(''); setOpeningCashInput(''); setRegisterError(''); setRegisterDialogOpen(true); }}
+              >
+                <LogIn className="h-3 w-3" />
+                Open Register
+              </button>
             )}
             {sessionId && (
-              <button
-                className="text-muted-foreground hover:text-foreground"
-                title="Record cash drop"
-                onClick={() => { setCashDropAmount(''); setCashDropNote(''); setCashDropOpen(true); }}
+              <>
+                <button
+                  className="text-muted-foreground hover:text-destructive"
+                  title="End of Day / Close Register"
+                  onClick={openEod}
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  className="text-muted-foreground hover:text-foreground"
+                  title="Record cash drop"
+                  onClick={() => { setCashDropAmount(''); setCashDropNote(''); setCashDropOpen(true); }}
               >
                 <DollarSign className="h-4 w-4" />
               </button>
+              </>
             )}
             {/* Held orders dropdown */}
             <button
@@ -1003,6 +1094,171 @@ export function TerminalPage() {
         onClose={() => setCheckoutOpen(false)}
         onOrderComplete={handleOrderComplete}
       />
+
+      {/* ── Open Register dialog ─────────────────────────────────────────────── */}
+      {registerDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setRegisterDialogOpen(false)} />
+          <div className="relative bg-background rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-lg">Open Register</h2>
+              <button onClick={() => setRegisterDialogOpen(false)}><X className="h-4 w-4" /></button>
+            </div>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label>Register</Label>
+                <select
+                  className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+                  value={selectedRegisterId}
+                  onChange={(e) => setSelectedRegisterId(e.target.value)}
+                >
+                  <option value="">Select a register…</option>
+                  {(registers ?? []).map((r) => (
+                    <option key={r.id} value={r.id}>{r.name} — {r.location.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Opening Cash Float</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={openingCashInput}
+                  onChange={(e) => setOpeningCashInput(e.target.value)}
+                />
+              </div>
+              {registerError && <p className="text-sm text-destructive">{registerError}</p>}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setRegisterDialogOpen(false)}>Cancel</Button>
+              <Button
+                disabled={!selectedRegisterId || openRegisterMutation.isPending}
+                onClick={() => openRegisterMutation.mutate({
+                  registerId: selectedRegisterId,
+                  openingCash: parseFloat(openingCashInput) || 0,
+                })}
+              >
+                <LogIn className="h-4 w-4 mr-2" />
+                {openRegisterMutation.isPending ? 'Opening…' : 'Open Register'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── End of Day / Close Register dialog ──────────────────────────────── */}
+      {eodOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => eodStep !== 'done' && setEodOpen(false)} />
+          <div className="relative bg-background rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4">
+            {eodStep === 'done' ? (
+              <>
+                <h2 className="font-semibold text-lg text-green-600">Register Closed</h2>
+                <p className="text-sm text-muted-foreground">Session closed successfully. Have a great day!</p>
+                <Button className="w-full" onClick={() => { setEodOpen(false); setEodStep('summary'); }}>Done</Button>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <h2 className="font-semibold text-lg">End of Day</h2>
+                  <button onClick={() => setEodOpen(false)}><X className="h-4 w-4" /></button>
+                </div>
+
+                {eodSummary && eodStep === 'summary' && (
+                  <div className="border rounded-lg divide-y text-sm">
+                    <div className="flex justify-between px-3 py-2">
+                      <span className="text-muted-foreground">Orders</span>
+                      <span className="font-medium">{eodSummary.orderCount}</span>
+                    </div>
+                    <div className="flex justify-between px-3 py-2">
+                      <span className="text-muted-foreground">Sales Total</span>
+                      <span className="font-medium">{formatCurrency(eodSummary.salesTotal)}</span>
+                    </div>
+                    {Object.entries(eodSummary.paymentTotals).map(([method, amount]) => (
+                      <div key={method} className="flex justify-between px-3 py-2 text-muted-foreground">
+                        <span className="capitalize">{method.replace('_', ' ')}</span>
+                        <span>{formatCurrency(amount)}</span>
+                      </div>
+                    ))}
+                    {eodSummary.cashDropsTotal > 0 && (
+                      <div className="flex justify-between px-3 py-2 text-muted-foreground">
+                        <span>Cash Drops</span>
+                        <span>-{formatCurrency(eodSummary.cashDropsTotal)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between px-3 py-2 font-semibold">
+                      <span>Expected Cash in Drawer</span>
+                      <span>{formatCurrency(eodSummary.expectedCash)}</span>
+                    </div>
+                  </div>
+                )}
+                {!eodSummary && eodStep === 'summary' && (
+                  <p className="text-sm text-muted-foreground">Loading session summary…</p>
+                )}
+
+                {eodStep === 'confirm' && (
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label>Actual Cash in Drawer</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={closingCashInput}
+                        autoFocus
+                        onChange={(e) => setClosingCashInput(e.target.value)}
+                      />
+                    </div>
+                    {eodSummary && closingCashInput && (
+                      <div className={`text-sm font-medium px-3 py-2 rounded-md ${
+                        Math.abs(parseFloat(closingCashInput) - eodSummary.expectedCash) < 0.01
+                          ? 'bg-green-50 text-green-700'
+                          : 'bg-amber-50 text-amber-700'
+                      }`}>
+                        Variance: {formatCurrency(parseFloat(closingCashInput) - (eodSummary?.expectedCash ?? 0))}
+                      </div>
+                    )}
+                    {registerError && <p className="text-sm text-destructive">{registerError}</p>}
+                  </div>
+                )}
+
+                <div className="flex gap-2 justify-end">
+                  {eodStep === 'summary' && (
+                    <>
+                      <Button variant="outline" onClick={() => setEodOpen(false)}>Cancel</Button>
+                      <Button onClick={() => setEodStep('confirm')}>
+                        Continue to Close
+                      </Button>
+                    </>
+                  )}
+                  {eodStep === 'confirm' && (
+                    <>
+                      <Button variant="outline" onClick={() => setEodStep('summary')}>Back</Button>
+                      <Button
+                        variant="destructive"
+                        disabled={closeRegisterMutation.isPending}
+                        onClick={() => {
+                          if (!registerId) return;
+                          closeRegisterMutation.mutate({
+                            registerId,
+                            closingCash: parseFloat(closingCashInput) || 0,
+                          });
+                        }}
+                      >
+                        <LogOut className="h-4 w-4 mr-2" />
+                        {closeRegisterMutation.isPending ? 'Closing…' : 'Close Register'}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
