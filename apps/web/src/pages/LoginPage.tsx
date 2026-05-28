@@ -29,7 +29,8 @@ export function LoginPage() {
       navigate('/');
     } catch (err) {
       if (axios.isAxiosError(err) && !err.response) {
-        setError(`Cannot reach API server at ${apiBase} — make sure it is running.`);
+        const detail = err.code ?? err.message ?? 'unknown';
+        setError(`Cannot reach API server at ${apiBase} (${detail}) — make sure it is running.`);
       } else if (axios.isAxiosError(err) && err.response?.status === 401) {
         setError('Invalid email or password.');
       } else {
