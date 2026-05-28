@@ -33,19 +33,20 @@ type Tenant = { id: string; name: string; slug: string; settings: Record<string,
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 
-type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard' | 'features' | 'hardware' | 'audit';
+type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard' | 'features' | 'hardware' | 'audit' | 'integrations';
 
 const allTabs: { id: Tab; label: string; adminOnly?: boolean }[] = [
-  { id: 'terminal',  label: 'Terminal' },
-  { id: 'keyboard',  label: 'Keyboard' },
-  { id: 'hardware',  label: 'Hardware' },
-  { id: 'general',   label: 'General',   adminOnly: true },
-  { id: 'locations', label: 'Locations', adminOnly: true },
-  { id: 'registers', label: 'Registers', adminOnly: true },
-  { id: 'users',     label: 'Users',     adminOnly: true },
-  { id: 'loyalty',   label: 'Loyalty',   adminOnly: true },
-  { id: 'features',  label: 'Features',  adminOnly: true },
-  { id: 'audit',     label: 'Audit Log', adminOnly: true },
+  { id: 'terminal',     label: 'Terminal' },
+  { id: 'keyboard',     label: 'Keyboard' },
+  { id: 'hardware',     label: 'Hardware' },
+  { id: 'general',      label: 'General',      adminOnly: true },
+  { id: 'locations',    label: 'Locations',    adminOnly: true },
+  { id: 'registers',    label: 'Registers',    adminOnly: true },
+  { id: 'users',        label: 'Users',        adminOnly: true },
+  { id: 'loyalty',      label: 'Loyalty',      adminOnly: true },
+  { id: 'integrations', label: 'Integrations', adminOnly: true },
+  { id: 'features',     label: 'Features',     adminOnly: true },
+  { id: 'audit',        label: 'Audit Log',    adminOnly: true },
 ];
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -1564,6 +1565,201 @@ function FeaturesTab() {
   );
 }
 
+// ─── Integrations tab ────────────────────────────────────────────────────────
+
+interface IntegrationStatus {
+  configured: boolean;
+  connected: boolean;
+  companyName?: string;
+  orgName?: string;
+  connectedAt?: string;
+  lastSync?: string;
+}
+
+function IntegrationCard({
+  name,
+  logo,
+  description,
+  statusKey,
+  connectEndpoint,
+  syncEndpoint,
+  disconnectEndpoint,
+  orgLabel,
+}: {
+  name: string;
+  logo: React.ReactNode;
+  description: string;
+  statusKey: string;
+  connectEndpoint: string;
+  syncEndpoint: string;
+  disconnectEndpoint: string;
+  orgLabel: string;
+}) {
+  const qc = useQueryClient();
+  const [from, setFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [syncResult, setSyncResult] = useState<{ pushed: number; errors: Array<{ orderId: string; error: string }> } | null>(null);
+
+  const { data: status, isLoading } = useQuery<IntegrationStatus>({
+    queryKey: ['integration-status', statusKey],
+    queryFn: () => api.get(`/integrations/${statusKey}/status`).then((r) => r.data.data),
+    retry: false,
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: () => api.post(`/integrations/${syncEndpoint}/sync`, null, { params: { from, to } }).then((r) => r.data.data),
+    onSuccess: (d) => {
+      setSyncResult(d);
+      qc.invalidateQueries({ queryKey: ['integration-status', statusKey] });
+    },
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: () => api.delete(`/integrations/${disconnectEndpoint}/disconnect`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['integration-status', statusKey] }),
+  });
+
+  async function handleConnect() {
+    const { data } = await api.get(`/integrations/${connectEndpoint}/connect`);
+    window.open(data.data.url, '_blank', 'width=600,height=700,noopener');
+    // Poll status after a short delay so the newly-opened tab has time to complete OAuth
+    setTimeout(() => qc.invalidateQueries({ queryKey: ['integration-status', statusKey] }), 3000);
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            {logo}
+            <div>
+              <CardTitle className="text-base">{name}</CardTitle>
+              <CardDescription className="text-xs mt-0.5">{description}</CardDescription>
+            </div>
+          </div>
+          <Badge variant={status?.connected ? 'success' : 'secondary'} className="shrink-0">
+            {isLoading ? '…' : status?.connected ? 'Connected' : status?.configured ? 'Not connected' : 'Not configured'}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {!status?.configured && !isLoading && (
+          <p className="text-xs text-muted-foreground rounded-md bg-muted/50 border p-3">
+            Set <code className="font-mono">{statusKey.toUpperCase().replace('-', '_')}_CLIENT_ID</code> and{' '}
+            <code className="font-mono">{statusKey.toUpperCase().replace('-', '_')}_CLIENT_SECRET</code> environment
+            variables on the API server to enable this integration.
+          </p>
+        )}
+
+        {status?.connected && (
+          <div className="text-sm space-y-1">
+            <p><span className="text-muted-foreground">{orgLabel}:</span> <strong>{status.companyName ?? status.orgName}</strong></p>
+            {status.connectedAt && <p className="text-xs text-muted-foreground">Connected {new Date(status.connectedAt).toLocaleDateString()}</p>}
+            {status.lastSync && <p className="text-xs text-muted-foreground">Last synced {new Date(status.lastSync).toLocaleString()}</p>}
+          </div>
+        )}
+
+        {status?.connected && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">Manual sync — push completed orders</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1">
+                <label className="text-xs text-muted-foreground">From</label>
+                <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-7 w-36 text-xs" />
+              </div>
+              <div className="flex items-center gap-1">
+                <label className="text-xs text-muted-foreground">To</label>
+                <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-7 w-36 text-xs" />
+              </div>
+              <Button size="sm" className="h-7 text-xs" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
+                {syncMutation.isPending ? 'Syncing…' : 'Sync'}
+              </Button>
+            </div>
+            {syncResult && (
+              <div className="text-xs rounded-md border px-3 py-2 space-y-1">
+                <p className="text-green-700 font-medium">{syncResult.pushed} order{syncResult.pushed !== 1 ? 's' : ''} pushed</p>
+                {syncResult.errors.map((e, i) => (
+                  <p key={i} className="text-destructive">{e.orderId.slice(-8).toUpperCase()}: {e.error}</p>
+                ))}
+              </div>
+            )}
+            {syncMutation.isError && (
+              <p className="text-xs text-destructive">{(syncMutation.error as Error).message}</p>
+            )}
+          </div>
+        )}
+
+        <div className="flex gap-2 pt-1">
+          {!status?.connected && status?.configured && (
+            <Button size="sm" variant="outline" onClick={handleConnect}>Connect {name}</Button>
+          )}
+          {status?.connected && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive hover:text-destructive"
+              onClick={() => disconnectMutation.mutate()}
+              disabled={disconnectMutation.isPending}
+            >
+              {disconnectMutation.isPending ? 'Disconnecting…' : 'Disconnect'}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function IntegrationsTab() {
+  const [searchParams] = useSearchParams();
+  const [successMsg, setSuccessMsg] = useState('');
+
+  useEffect(() => {
+    const connected = searchParams.get('connected');
+    if (connected === 'quickbooks') setSuccessMsg('QuickBooks connected successfully!');
+    if (connected === 'xero') setSuccessMsg('Xero connected successfully!');
+  }, [searchParams]);
+
+  return (
+    <div className="space-y-6">
+      {successMsg && (
+        <div className="rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+          {successMsg}
+        </div>
+      )}
+
+      <div>
+        <h2 className="text-lg font-semibold">Accounting Integrations</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Connect your accounting software to automatically push completed orders. Each sale creates a sales receipt or bank transaction in real time.
+        </p>
+      </div>
+
+      <IntegrationCard
+        name="QuickBooks Online"
+        logo={<div className="w-8 h-8 rounded-md bg-[#2CA01C] flex items-center justify-center text-white text-xs font-bold shrink-0">QB</div>}
+        description="Push completed orders as SalesReceipts. Creates a 'POS Sales' service item automatically."
+        statusKey="quickbooks"
+        connectEndpoint="quickbooks"
+        syncEndpoint="quickbooks"
+        disconnectEndpoint="quickbooks"
+        orgLabel="Company"
+      />
+
+      <IntegrationCard
+        name="Xero"
+        logo={<div className="w-8 h-8 rounded-md bg-[#13B5EA] flex items-center justify-center text-white text-xs font-bold shrink-0">Xe</div>}
+        description="Push completed orders as bank transactions. Uses account codes 200 (Sales), 820 (Tax), 090 (Bank) by default."
+        statusKey="xero"
+        connectEndpoint="xero"
+        syncEndpoint="xero"
+        disconnectEndpoint="xero"
+        orgLabel="Organisation"
+      />
+    </div>
+  );
+}
+
 // ─── Audit Log tab ────────────────────────────────────────────────────────────
 
 function AuditLogTab() {
@@ -1684,8 +1880,9 @@ export function SettingsPage() {
       {tab === 'registers' && isAdmin && <RegistersTab />}
       {tab === 'users'     && isAdmin && <UsersTab />}
       {tab === 'loyalty'   && isAdmin && <LoyaltyTab />}
-      {tab === 'features'  && isAdmin && <FeaturesTab />}
-      {tab === 'audit'     && isAdmin && <AuditLogTab />}
+      {tab === 'integrations' && isAdmin && <IntegrationsTab />}
+      {tab === 'features'     && isAdmin && <FeaturesTab />}
+      {tab === 'audit'        && isAdmin && <AuditLogTab />}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { formatCurrency } from '@/lib/utils';
-import { ShoppingCart, Plus, Trash2, RefreshCw } from 'lucide-react';
+import { ShoppingCart, Plus, Trash2, RefreshCw, ScanBarcode } from 'lucide-react';
 import type { PurchaseOrder, PurchaseOrderStatus } from '@pos/types';
 
 const STATUS_VARIANTS: Record<PurchaseOrderStatus, 'secondary' | 'warning' | 'success' | 'destructive'> = {
@@ -53,6 +53,29 @@ export function PurchaseOrdersPage() {
   const [createError, setCreateError] = useState('');
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [productSearch, setProductSearch] = useState('');
+
+  // Barcode scan for receiving
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const barcodeRef = useRef<HTMLInputElement>(null);
+
+  function handleBarcodeScan(raw: string) {
+    const barcode = raw.trim();
+    if (!barcode || !receiving) return;
+    const match = receiving.items.find(
+      (item) =>
+        item.variant?.barcode === barcode ||
+        item.variant?.sku === barcode ||
+        item.product?.barcode === barcode ||
+        item.product?.sku === barcode,
+    );
+    if (match) {
+      const remaining = match.orderedQty - match.receivedQty - (receiveQtys[match.id] ?? 0);
+      if (remaining > 0) {
+        setReceiveQtys((q) => ({ ...q, [match.id]: (q[match.id] ?? 0) + 1 }));
+      }
+    }
+    setBarcodeInput('');
+  }
 
   // Reorder generation dialog
   const [showReorder, setShowReorder] = useState(false);
@@ -584,11 +607,27 @@ export function PurchaseOrdersPage() {
       </Dialog>
 
       {/* Receive dialog */}
-      <Dialog open={!!receiving} onOpenChange={(o: boolean) => !o && setReceiving(null)}>
+      <Dialog open={!!receiving} onOpenChange={(o: boolean) => { if (!o) { setReceiving(null); setBarcodeInput(''); } }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Receive Items</DialogTitle></DialogHeader>
           {receiving && (
             <div className="space-y-3">
+              {/* Barcode scanner input */}
+              <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
+                <ScanBarcode className="h-4 w-4 text-muted-foreground shrink-0" />
+                <input
+                  ref={barcodeRef}
+                  type="text"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                  placeholder="Scan barcode to receive item…"
+                  value={barcodeInput}
+                  onChange={(e) => setBarcodeInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { handleBarcodeScan(barcodeInput); e.preventDefault(); }
+                  }}
+                  autoFocus
+                />
+              </div>
               <table className="w-full text-sm border rounded-lg overflow-hidden">
                 <thead className="bg-muted/50">
                   <tr>

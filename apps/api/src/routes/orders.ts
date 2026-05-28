@@ -381,6 +381,15 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
       });
     });
 
+    // ── accounting: push to QuickBooks / Xero ─────────────────────────────────
+    {
+      const { pushOrderToQbo, pushOrderToXero } = await import('./integrations');
+      Promise.allSettled([
+        pushOrderToQbo(req.user!.tenantId, completed.id).catch(() => {}),
+        pushOrderToXero(req.user!.tenantId, completed.id).catch(() => {}),
+      ]);
+    }
+
     // ── hook: order:after-complete ─────────────────────────────────────────────
     await hooks.run('order:after-complete', {
       payload: { order: completed as Parameters<typeof hooks.run<'order:after-complete'>>[1]['payload']['order'] },
