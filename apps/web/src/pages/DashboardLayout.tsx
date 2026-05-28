@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/auth';
 import { useTerminalStore } from '@/stores/terminal';
 import { api } from '@/lib/api';
+import { useFeatures } from '@/lib/features';
 import { cn } from '@/lib/utils';
 import { formatCurrency } from '@/lib/utils';
 import {
@@ -45,6 +46,7 @@ type NavItem = {
   label: string;
   icon: React.ElementType;
   minRole?: 'manager' | 'admin';
+  featureKey?: string;
 };
 
 type NavGroup = {
@@ -57,43 +59,43 @@ const allGroups: NavGroup[] = [
     label: 'Sales',
     items: [
       { to: '/orders',          label: 'Orders',          icon: ClipboardList },
-      { to: '/returns',         label: 'Returns',         icon: RotateCcw },
-      { to: '/estimates',       label: 'Estimates',       icon: FileText },
-      { to: '/layaway',         label: 'Layaway',         icon: Archive },
-      { to: '/service-tickets', label: 'Service Tickets', icon: Wrench },
+      { to: '/returns',         label: 'Returns',         icon: RotateCcw,     featureKey: 'returns' },
+      { to: '/estimates',       label: 'Estimates',       icon: FileText,      featureKey: 'estimates' },
+      { to: '/layaway',         label: 'Layaway',         icon: Archive,       featureKey: 'layaway' },
+      { to: '/service-tickets', label: 'Service Tickets', icon: Wrench,        featureKey: 'serviceTickets' },
     ],
   },
   {
     label: 'Catalog',
     items: [
       { to: '/products',     label: 'Products',     icon: Package,        minRole: 'manager' },
-      { to: '/bundles',      label: 'Bundles',      icon: PackageOpen,    minRole: 'manager' },
-      { to: '/inventory',    label: 'Inventory',    icon: Warehouse,      minRole: 'manager' },
-      { to: '/cycle-counts', label: 'Cycle Counts', icon: ClipboardCheck, minRole: 'manager' },
-      { to: '/promotions',   label: 'Promotions',   icon: Tag,            minRole: 'manager' },
-      { to: '/price-levels', label: 'Price Levels', icon: Layers,         minRole: 'manager' },
-      { to: '/gift-cards',   label: 'Gift Cards',   icon: CreditCard,     minRole: 'manager' },
+      { to: '/bundles',      label: 'Bundles',      icon: PackageOpen,    minRole: 'manager', featureKey: 'bundles' },
+      { to: '/inventory',    label: 'Inventory',    icon: Warehouse,      minRole: 'manager', featureKey: 'inventory' },
+      { to: '/cycle-counts', label: 'Cycle Counts', icon: ClipboardCheck, minRole: 'manager', featureKey: 'cycleCounts' },
+      { to: '/promotions',   label: 'Promotions',   icon: Tag,            minRole: 'manager', featureKey: 'promotions' },
+      { to: '/price-levels', label: 'Price Levels', icon: Layers,         minRole: 'manager', featureKey: 'priceLevels' },
+      { to: '/gift-cards',   label: 'Gift Cards',   icon: CreditCard,     minRole: 'manager', featureKey: 'giftCards' },
     ],
   },
   {
     label: 'Customers',
     items: [
-      { to: '/customers', label: 'Customers', icon: Users },
+      { to: '/customers', label: 'Customers', icon: Users, featureKey: 'customers' },
     ],
   },
   {
     label: 'Procurement',
     items: [
-      { to: '/vendors',         label: 'Vendors',         icon: Building2,      minRole: 'manager' },
-      { to: '/purchase-orders', label: 'Purchase Orders', icon: Truck,          minRole: 'manager' },
-      { to: '/stock-transfers', label: 'Stock Transfers', icon: ArrowRightLeft, minRole: 'manager' },
+      { to: '/vendors',         label: 'Vendors',         icon: Building2,      minRole: 'manager', featureKey: 'vendors' },
+      { to: '/purchase-orders', label: 'Purchase Orders', icon: Truck,          minRole: 'manager', featureKey: 'purchaseOrders' },
+      { to: '/stock-transfers', label: 'Stock Transfers', icon: ArrowRightLeft, minRole: 'manager', featureKey: 'stockTransfers' },
     ],
   },
   {
     label: 'Team',
     items: [
-      { to: '/time-clock', label: 'Time Clock', icon: Clock },
-      { to: '/reports',    label: 'Reports',    icon: BarChart3, minRole: 'manager' },
+      { to: '/time-clock', label: 'Time Clock', icon: Clock,    featureKey: 'timeClock' },
+      { to: '/reports',    label: 'Reports',    icon: BarChart3, minRole: 'manager', featureKey: 'reports' },
     ],
   },
 ];
@@ -396,8 +398,14 @@ export function DashboardLayout() {
   const canSee = (minRole?: 'manager' | 'admin') =>
     !minRole || userLevel >= roleLevel[minRole];
 
+  const features = useFeatures();
   const visibleGroups = allGroups
-    .map((g) => ({ ...g, visibleItems: g.items.filter((i) => canSee(i.minRole)) }))
+    .map((g) => ({
+      ...g,
+      visibleItems: g.items.filter(
+        (i) => canSee(i.minRole) && (!i.featureKey || features[i.featureKey] !== false),
+      ),
+    }))
     .filter((g) => g.visibleItems.length > 0);
 
   function handleLogout() {

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth';
+import { useFeatures } from '@/lib/features';
 import { LoginPage } from '@/pages/LoginPage';
 import { DashboardLayout } from '@/pages/DashboardLayout';
 import { DashboardHome } from '@/pages/DashboardHome';
@@ -29,6 +30,12 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
 }
 
+function RequireFeature({ featureKey, children }: { featureKey: string; children: React.ReactNode }) {
+  const features = useFeatures();
+  // Allow access while tenant data is still loading (features default to true)
+  return features[featureKey] === false ? <Navigate to="/" replace /> : <>{children}</>;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -45,24 +52,24 @@ export default function App() {
           <Route index element={<DashboardHome />} />
           <Route path="terminal" element={<TerminalPage />} />
           <Route path="products" element={<ProductsPage />} />
-          <Route path="inventory" element={<InventoryPage />} />
           <Route path="orders" element={<OrdersPage />} />
-          <Route path="returns" element={<ReturnsPage />} />
-          <Route path="customers" element={<CustomersPage />} />
-          <Route path="reports" element={<ReportsPage />} />
-          <Route path="vendors" element={<VendorsPage />} />
-          <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
-          <Route path="promotions" element={<PromotionsPage />} />
-          <Route path="price-levels" element={<PriceLevelsPage />} />
-          <Route path="gift-cards" element={<GiftCardsPage />} />
-          <Route path="estimates" element={<EstimatesPage />} />
-          <Route path="layaway" element={<LayawayPage />} />
-          <Route path="time-clock" element={<TimeClockPage />} />
-          <Route path="cycle-counts" element={<CycleCountPage />} />
-          <Route path="service-tickets" element={<ServiceTicketsPage />} />
-          <Route path="bundles" element={<BundlesPage />} />
-          <Route path="stock-transfers" element={<StockTransfersPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="returns" element={<RequireFeature featureKey="returns"><ReturnsPage /></RequireFeature>} />
+          <Route path="estimates" element={<RequireFeature featureKey="estimates"><EstimatesPage /></RequireFeature>} />
+          <Route path="layaway" element={<RequireFeature featureKey="layaway"><LayawayPage /></RequireFeature>} />
+          <Route path="service-tickets" element={<RequireFeature featureKey="serviceTickets"><ServiceTicketsPage /></RequireFeature>} />
+          <Route path="bundles" element={<RequireFeature featureKey="bundles"><BundlesPage /></RequireFeature>} />
+          <Route path="inventory" element={<RequireFeature featureKey="inventory"><InventoryPage /></RequireFeature>} />
+          <Route path="cycle-counts" element={<RequireFeature featureKey="cycleCounts"><CycleCountPage /></RequireFeature>} />
+          <Route path="promotions" element={<RequireFeature featureKey="promotions"><PromotionsPage /></RequireFeature>} />
+          <Route path="price-levels" element={<RequireFeature featureKey="priceLevels"><PriceLevelsPage /></RequireFeature>} />
+          <Route path="gift-cards" element={<RequireFeature featureKey="giftCards"><GiftCardsPage /></RequireFeature>} />
+          <Route path="customers" element={<RequireFeature featureKey="customers"><CustomersPage /></RequireFeature>} />
+          <Route path="vendors" element={<RequireFeature featureKey="vendors"><VendorsPage /></RequireFeature>} />
+          <Route path="purchase-orders" element={<RequireFeature featureKey="purchaseOrders"><PurchaseOrdersPage /></RequireFeature>} />
+          <Route path="stock-transfers" element={<RequireFeature featureKey="stockTransfers"><StockTransfersPage /></RequireFeature>} />
+          <Route path="time-clock" element={<RequireFeature featureKey="timeClock"><TimeClockPage /></RequireFeature>} />
+          <Route path="reports" element={<RequireFeature featureKey="reports"><ReportsPage /></RequireFeature>} />
         </Route>
       </Routes>
     </BrowserRouter>

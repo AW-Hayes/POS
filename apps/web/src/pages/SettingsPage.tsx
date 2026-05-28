@@ -16,9 +16,10 @@ import {
 import {
   Monitor, Tablet, List, BookOpen, CreditCard, Save,
   Building2, PlusCircle, Pencil, Trash2,
-  Star, Settings, AlertCircle, Keyboard, RotateCcw,
+  Star, Settings, AlertCircle, Keyboard, RotateCcw, ToggleLeft, ToggleRight,
 } from 'lucide-react';
 import { DEFAULT_HOTKEYS, loadHotkeyMap, saveHotkeyMap, resetHotkeyMap, eventToKey } from '@/lib/hotkeys';
+import { FEATURE_DEFS, getFeatureFlags } from '@/lib/features';
 import type { PaymentTerminalConfig } from '@pos/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -30,7 +31,7 @@ type Tenant = { id: string; name: string; slug: string; settings: Record<string,
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 
-type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard';
+type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard' | 'features';
 
 const allTabs: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'terminal',  label: 'Terminal' },
@@ -40,6 +41,7 @@ const allTabs: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'registers', label: 'Registers', adminOnly: true },
   { id: 'users',     label: 'Users',     adminOnly: true },
   { id: 'loyalty',   label: 'Loyalty',   adminOnly: true },
+  { id: 'features',  label: 'Features',  adminOnly: true },
 ];
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -1216,6 +1218,90 @@ function KeyboardTab() {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+// ─── Features tab ────────────────────────────────────────────────────────────
+
+const FEATURE_GROUPS = ['Sales', 'Catalog', 'Customers', 'Procurement', 'Team'] as const;
+
+function FeaturesTab() {
+  const queryClient = useQueryClient();
+  const { data: tenant } = useTenant();
+  const settings = (tenant?.settings ?? {}) as Record<string, unknown>;
+
+  const [flags, setFlags] = useState<Record<string, boolean>>({});
+  const [initialised, setInitialised] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  if (tenant && !initialised) {
+    setFlags(getFeatureFlags((settings.features ?? {}) as Record<string, boolean>));
+    setInitialised(true);
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      api.patch('/tenants/current', { settings: { ...settings, features: flags } }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tenant', 'current'] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Feature Toggles</CardTitle>
+          <CardDescription>
+            Enable or disable modules to match your workflow. Disabled features are hidden from the navigation.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {FEATURE_GROUPS.map((group) => {
+            const defs = FEATURE_DEFS.filter((d) => d.group === group);
+            return (
+              <div key={group}>
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                  {group}
+                </h3>
+                <div className="space-y-1">
+                  {defs.map((def) => {
+                    const enabled = flags[def.key] ?? true;
+                    return (
+                      <button
+                        key={def.key}
+                        type="button"
+                        onClick={() => setFlags((f) => ({ ...f, [def.key]: !enabled }))}
+                        className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                      >
+                        <div>
+                          <p className="text-sm font-medium">{def.label}</p>
+                          <p className="text-xs text-muted-foreground">{def.description}</p>
+                        </div>
+                        {enabled ? (
+                          <ToggleRight className="h-6 w-6 text-primary shrink-0 ml-4" />
+                        ) : (
+                          <ToggleLeft className="h-6 w-6 text-muted-foreground shrink-0 ml-4" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="flex items-center gap-3 pt-2">
+            <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+              {saveMutation.isPending ? 'Saving…' : 'Save Changes'}
+            </Button>
+            <SavedBadge saved={saved} />
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
@@ -1225,7 +1311,15 @@ export function SettingsPage() {
     return qTab && allTabs.some((t) => t.id === qTab) ? qTab : 'terminal';
   });
 
-  const visibleTabs = allTabs.filter((t) => !t.adminOnly || isAdmin);
+  const { data: tenant } = useTenant();
+  const tenantSettings = (tenant?.settings ?? {}) as Record<string, unknown>;
+  const features = getFeatureFlags((tenantSettings.features ?? {}) as Record<string, boolean>);
+
+  const visibleTabs = allTabs.filter((t) => {
+    if (t.adminOnly && !isAdmin) return false;
+    if (t.id === 'loyalty' && !features.loyalty) return false;
+    return true;
+  });
 
   return (
     <div className="p-6 max-w-3xl space-y-6">
@@ -1260,6 +1354,7 @@ export function SettingsPage() {
       {tab === 'registers' && isAdmin && <RegistersTab />}
       {tab === 'users'     && isAdmin && <UsersTab />}
       {tab === 'loyalty'   && isAdmin && <LoyaltyTab />}
+      {tab === 'features'  && isAdmin && <FeaturesTab />}
     </div>
   );
 }

@@ -22,6 +22,7 @@ export interface TenantSettings {
   receiptFooter?: string;
   logoUrl?: string;
   paymentTerminal?: PaymentTerminalConfig;
+  features?: Record<string, boolean>;
 }
 
 export interface Location {
