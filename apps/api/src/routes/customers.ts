@@ -53,6 +53,9 @@ customersRouter.post('/', async (req, res, next) => {
     const customer = await prisma.customer.create({
       data: { ...data, tenantId: req.user!.tenantId },
     });
+    // Non-blocking Mailchimp sync
+    const { syncCustomerToMailchimp } = await import('./integrations');
+    syncCustomerToMailchimp(req.user!.tenantId, customer.id).catch(() => {});
     res.status(201).json({ success: true, data: customer });
   } catch (err) {
     next(err);
@@ -87,6 +90,8 @@ customersRouter.patch('/:id', async (req, res, next) => {
     if (!existing) throw new AppError(404, 'Customer not found');
     const data = customerSchema.partial().parse(req.body);
     const customer = await prisma.customer.update({ where: { id: req.params.id }, data });
+    const { syncCustomerToMailchimp } = await import('./integrations');
+    syncCustomerToMailchimp(req.user!.tenantId, customer.id).catch(() => {});
     res.json({ success: true, data: customer });
   } catch (err) {
     next(err);

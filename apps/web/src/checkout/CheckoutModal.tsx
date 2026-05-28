@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
@@ -6,6 +6,10 @@ import { cn } from '@/lib/utils';
 import { enqueueOrder } from '@/lib/offlineQueue';
 import { pipelineRegistry } from './registry';
 import type { CheckoutState, CartItem } from './types';
+
+function getDisplayChannel() {
+  try { return new BroadcastChannel('pos-display'); } catch { return null; }
+}
 
 interface CheckoutModalProps {
   open: boolean;
@@ -26,6 +30,7 @@ export function CheckoutModal({
 }: CheckoutModalProps) {
   const user = useAuthStore((s) => s.user);
   const steps = pipelineRegistry.getSteps();
+  const displayChannel = useRef(getDisplayChannel());
 
   const [state, setState] = useState<CheckoutState>({
     cart: initialCart,
@@ -45,6 +50,22 @@ export function CheckoutModal({
       setError(null);
     }
   }, [open, initialCart, locationId, sessionId]);
+
+  // Broadcast cart state to customer display whenever cart changes
+  useEffect(() => {
+    if (!open || state.cart.length === 0) return;
+    const subtotal = state.cart.reduce((s, i) => s + (i.price - i.discount) * i.quantity, 0);
+    displayChannel.current?.postMessage({
+      type: 'cart',
+      items: state.cart.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price, discount: i.discount })),
+      subtotal,
+    });
+  }, [open, state.cart]);
+
+  // Reset display to idle when modal closes
+  useEffect(() => {
+    if (!open) displayChannel.current?.postMessage({ type: 'idle' });
+  }, [open]);
 
   const submitOrder = useMutation({
     mutationFn: async (finalState: CheckoutState) => {
@@ -80,9 +101,10 @@ export function CheckoutModal({
       const orderId: string = orderRes.data.id;
 
       // Complete the order with payments
+      const tipAmount = (hooked.meta.tipAmount as number) ?? 0;
       await api.post(`/orders/${orderId}/complete`, {
         payments: hooked.payments,
-        tipAmount: (hooked.meta.tipAmount as number) ?? 0,
+        tipAmount,
       });
 
       // ── pipeline:after-submit hook ─────────────────────────────────────────
@@ -91,7 +113,18 @@ export function CheckoutModal({
       return orderId;
     },
     onSuccess: (orderId) => {
-      setState((s) => ({ ...s, orderId }));
+      setState((s) => {
+        const total = s.payments.reduce((sum, p) => sum + p.amount, 0);
+        const cashPayment = s.payments.find((p) => p.method === 'cash');
+        const change = cashPayment ? Math.max(0, cashPayment.amount - total) : undefined;
+        displayChannel.current?.postMessage({
+          type: 'complete',
+          total,
+          change,
+          payments: s.payments.map((p) => ({ method: p.method, amount: p.amount })),
+        });
+        return { ...s, orderId };
+      });
       // Move to the receipt step (last step)
       setStepIndex(steps.length - 1);
     },
@@ -118,6 +151,12 @@ export function CheckoutModal({
       // The payment step (second to last) triggers order submission
       const isPaymentStep = currentStep?.id === 'payment';
       if (isPaymentStep) {
+        const total = nextState.payments.reduce((s, p) => s + p.amount, 0);
+        displayChannel.current?.postMessage({
+          type: 'checkout',
+          total,
+          tipAmount: (nextState.meta.tipAmount as number | undefined),
+        });
         submitOrder.mutate(nextState);
         return;
       }

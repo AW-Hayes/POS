@@ -1756,7 +1756,222 @@ function IntegrationsTab() {
         disconnectEndpoint="xero"
         orgLabel="Organisation"
       />
+
+      <TwilioCard />
+      <MailchimpCard />
     </div>
+  );
+}
+
+// ─── Twilio config card ───────────────────────────────────────────────────────
+
+function TwilioCard() {
+  const queryClient = useQueryClient();
+  const { data: statusData, isLoading } = useQuery({
+    queryKey: ['integrations', 'twilio', 'status'],
+    queryFn: () => api.get('/integrations/twilio/status').then((r) => r.data.data),
+  });
+
+  const connected: boolean = statusData?.configured ?? false;
+  const [showForm, setShowForm] = useState(false);
+  const [fields, setFields] = useState({ accountSid: '', authToken: '', fromNumber: '' });
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState('');
+  const [testTo, setTestTo] = useState('');
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.put('/integrations/twilio/config', fields);
+      queryClient.invalidateQueries({ queryKey: ['integrations', 'twilio'] });
+      setShowForm(false);
+    } catch (err) { console.error(err); }
+    setSaving(false);
+  };
+
+  const test = async () => {
+    setTesting(true);
+    setTestMsg('');
+    try {
+      await api.post('/integrations/twilio/test', { to: testTo, message: 'RetailOS test message' });
+      setTestMsg('Sent!');
+    } catch (err) {
+      setTestMsg(err instanceof Error ? err.message : 'Failed');
+    }
+    setTesting(false);
+  };
+
+  const disconnect = async () => {
+    await api.delete('/integrations/twilio/disconnect');
+    queryClient.invalidateQueries({ queryKey: ['integrations', 'twilio'] });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-md bg-[#F22F46] flex items-center justify-center text-white text-xs font-bold shrink-0">Tw</div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base">Twilio SMS</CardTitle>
+              {!isLoading && (
+                <Badge variant={connected ? 'default' : 'secondary'} className="text-xs">
+                  {connected ? 'Connected' : 'Not connected'}
+                </Badge>
+              )}
+            </div>
+            <CardDescription className="text-xs mt-0.5">
+              Send order receipts and loyalty notifications via SMS.
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!showForm && !connected && (
+          <Button size="sm" onClick={() => setShowForm(true)}>Configure Twilio</Button>
+        )}
+        {!showForm && connected && (
+          <div className="flex gap-2 flex-wrap">
+            <Button size="sm" variant="outline" onClick={() => setShowForm(true)}>Update Credentials</Button>
+            <Button size="sm" variant="destructive" onClick={disconnect}>Disconnect</Button>
+          </div>
+        )}
+        {showForm && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Account SID</label>
+                <Input size={1} className="h-8 text-xs" placeholder="ACxxxxxxxx" value={fields.accountSid} onChange={(e) => setFields((f) => ({ ...f, accountSid: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Auth Token</label>
+                <Input size={1} className="h-8 text-xs" type="password" placeholder="••••••••" value={fields.authToken} onChange={(e) => setFields((f) => ({ ...f, authToken: e.target.value }))} />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">From Number</label>
+              <Input size={1} className="h-8 text-xs" placeholder="+15551234567" value={fields.fromNumber} onChange={(e) => setFields((f) => ({ ...f, fromNumber: e.target.value }))} />
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+              <Button size="sm" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
+            </div>
+          </div>
+        )}
+        {connected && !showForm && (
+          <div className="flex gap-2 items-end">
+            <div className="space-y-1 flex-1">
+              <label className="text-xs font-medium">Send test to</label>
+              <Input size={1} className="h-8 text-xs" placeholder="+15551234567" value={testTo} onChange={(e) => setTestTo(e.target.value)} />
+            </div>
+            <Button size="sm" variant="outline" onClick={test} disabled={testing || !testTo}>
+              {testing ? 'Sending…' : 'Test'}
+            </Button>
+            {testMsg && <span className="text-xs text-muted-foreground">{testMsg}</span>}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Mailchimp config card ────────────────────────────────────────────────────
+
+function MailchimpCard() {
+  const queryClient = useQueryClient();
+  const { data: statusData, isLoading } = useQuery({
+    queryKey: ['integrations', 'mailchimp', 'status'],
+    queryFn: () => api.get('/integrations/mailchimp/status').then((r) => r.data.data),
+  });
+
+  const connected: boolean = statusData?.configured ?? false;
+  const [showForm, setShowForm] = useState(false);
+  const [fields, setFields] = useState({ apiKey: '', audienceId: '' });
+  const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState('');
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.put('/integrations/mailchimp/config', fields);
+      queryClient.invalidateQueries({ queryKey: ['integrations', 'mailchimp'] });
+      setShowForm(false);
+    } catch (err) { console.error(err); }
+    setSaving(false);
+  };
+
+  const syncAll = async () => {
+    setSyncing(true);
+    setSyncResult('');
+    try {
+      const res = await api.post('/integrations/mailchimp/sync');
+      const d = res.data.data as { synced: number; errors: number };
+      setSyncResult(`${d.synced} synced, ${d.errors} errors`);
+    } catch (err) {
+      setSyncResult(err instanceof Error ? err.message : 'Failed');
+    }
+    setSyncing(false);
+  };
+
+  const disconnect = async () => {
+    await api.delete('/integrations/mailchimp/disconnect');
+    queryClient.invalidateQueries({ queryKey: ['integrations', 'mailchimp'] });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-md bg-[#FFE01B] flex items-center justify-center text-black text-xs font-bold shrink-0">Mc</div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base">Mailchimp</CardTitle>
+              {!isLoading && (
+                <Badge variant={connected ? 'default' : 'secondary'} className="text-xs">
+                  {connected ? 'Connected' : 'Not connected'}
+                </Badge>
+              )}
+            </div>
+            <CardDescription className="text-xs mt-0.5">
+              Sync customers to an audience list. New and updated customers sync automatically.
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!showForm && !connected && (
+          <Button size="sm" onClick={() => setShowForm(true)}>Configure Mailchimp</Button>
+        )}
+        {!showForm && connected && (
+          <div className="flex gap-2 flex-wrap">
+            <Button size="sm" variant="outline" onClick={syncAll} disabled={syncing}>
+              {syncing ? 'Syncing…' : 'Sync All Customers'}
+            </Button>
+            {syncResult && <span className="text-xs text-muted-foreground self-center">{syncResult}</span>}
+            <Button size="sm" variant="outline" onClick={() => setShowForm(true)}>Update API Key</Button>
+            <Button size="sm" variant="destructive" onClick={disconnect}>Disconnect</Button>
+          </div>
+        )}
+        {showForm && (
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium">API Key</label>
+              <Input size={1} className="h-8 text-xs" placeholder="xxxxxxxx-us6" type="password" value={fields.apiKey} onChange={(e) => setFields((f) => ({ ...f, apiKey: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Audience ID</label>
+              <Input size={1} className="h-8 text-xs" placeholder="abc123def" value={fields.audienceId} onChange={(e) => setFields((f) => ({ ...f, audienceId: e.target.value }))} />
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+              <Button size="sm" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

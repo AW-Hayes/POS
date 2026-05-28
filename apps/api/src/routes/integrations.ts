@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { createHash } from 'crypto';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticate, requireRole } from '../middleware/auth';
@@ -542,6 +543,209 @@ integrationsRouter.patch('/xero/accounts', requireRole('admin'), async (req, res
   try {
     const data = accountCodesSchema.parse(req.body);
     await updateIntegrationSettings(req.user!.tenantId, 'xero', data as Record<string, unknown>);
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// ─── Twilio SMS ───────────────────────────────────────────────────────────────
+
+async function sendSms(tenantId: string, to: string, body: string): Promise<void> {
+  const integrations = await getIntegrationSettings(tenantId);
+  const twilio = integrations.twilio as Record<string, string> | undefined;
+  if (!twilio?.accountSid || !twilio.authToken || !twilio.fromNumber) return;
+
+  const basic = Buffer.from(`${twilio.accountSid}:${twilio.authToken}`).toString('base64');
+  const res = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${twilio.accountSid}/Messages.json`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ To: to, From: twilio.fromNumber, Body: body }),
+    },
+  );
+  if (!res.ok) {
+    const d = await res.json() as { message?: string };
+    throw new Error(`Twilio: ${d.message ?? res.status}`);
+  }
+}
+
+export async function sendOrderReceiptSms(tenantId: string, orderId: string): Promise<void> {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { customer: { select: { phone: true, name: true } } },
+  });
+  if (!order?.customer?.phone) return;
+
+  const shortId = order.id.slice(-8).toUpperCase();
+  const name = order.customer.name.split(' ')[0];
+  await sendSms(
+    tenantId,
+    order.customer.phone,
+    `Thanks ${name}! Order #${shortId} total: $${order.total.toFixed(2)}. Reply STOP to opt out.`,
+  );
+}
+
+export async function sendLoyaltyEarnedSms(tenantId: string, customerId: string, earned: number, balance: number): Promise<void> {
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { phone: true, name: true },
+  });
+  if (!customer?.phone) return;
+
+  const name = customer.name.split(' ')[0];
+  await sendSms(
+    tenantId,
+    customer.phone,
+    `Hi ${name}! You earned ${earned} loyalty points. Balance: ${balance} pts. Reply STOP to opt out.`,
+  );
+}
+
+const twilioConfigSchema = z.object({
+  accountSid: z.string().min(1),
+  authToken: z.string().min(1),
+  fromNumber: z.string().min(1),
+  smsReceipts: z.boolean().optional(),
+  smsLoyalty: z.boolean().optional(),
+});
+
+integrationsRouter.get('/twilio/status', requireRole('admin', 'manager'), async (req, res, next) => {
+  try {
+    const integrations = await getIntegrationSettings(req.user!.tenantId);
+    const twilio = integrations.twilio as Record<string, unknown> | undefined;
+    res.json({
+      success: true,
+      data: {
+        connected: !!(twilio?.accountSid && twilio.authToken && twilio.fromNumber),
+        fromNumber: twilio?.fromNumber,
+        smsReceipts: twilio?.smsReceipts ?? true,
+        smsLoyalty: twilio?.smsLoyalty ?? true,
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+integrationsRouter.put('/twilio/config', requireRole('admin'), async (req, res, next) => {
+  try {
+    const data = twilioConfigSchema.parse(req.body);
+    await updateIntegrationSettings(req.user!.tenantId, 'twilio', data as Record<string, unknown>);
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+integrationsRouter.post('/twilio/test', requireRole('admin'), async (req, res, next) => {
+  try {
+    const { to } = z.object({ to: z.string().min(1) }).parse(req.body);
+    await sendSms(req.user!.tenantId, to, 'Test message from your POS system. Reply STOP to opt out.');
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+integrationsRouter.delete('/twilio/disconnect', requireRole('admin'), async (req, res, next) => {
+  try {
+    await updateIntegrationSettings(req.user!.tenantId, 'twilio', {
+      accountSid: null, authToken: null, fromNumber: null,
+    });
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// ─── Mailchimp ────────────────────────────────────────────────────────────────
+
+function mcDc(apiKey: string) {
+  const parts = apiKey.split('-');
+  return parts[parts.length - 1] ?? 'us1';
+}
+
+export async function syncCustomerToMailchimp(tenantId: string, customerId: string): Promise<void> {
+  const integrations = await getIntegrationSettings(tenantId);
+  const mc = integrations.mailchimp as Record<string, string> | undefined;
+  if (!mc?.apiKey || !mc.audienceId) return;
+
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { email: true, name: true, phone: true },
+  });
+  if (!customer?.email) return;
+
+  const dc = mcDc(mc.apiKey);
+  const emailHash = createHash('md5').update(customer.email.toLowerCase()).digest('hex');
+  const [firstName, ...rest] = customer.name.split(' ');
+
+  const res = await fetch(
+    `https://${dc}.api.mailchimp.com/3.0/lists/${mc.audienceId}/members/${emailHash}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`anystring:${mc.apiKey}`).toString('base64')}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email_address: customer.email,
+        status_if_new: 'subscribed',
+        merge_fields: { FNAME: firstName, LNAME: rest.join(' '), PHONE: customer.phone ?? '' },
+      }),
+    },
+  );
+  if (!res.ok) {
+    const d = await res.json() as { detail?: string; title?: string };
+    throw new Error(`Mailchimp: ${d.detail ?? d.title ?? res.status}`);
+  }
+}
+
+const mailchimpConfigSchema = z.object({
+  apiKey: z.string().min(1),
+  audienceId: z.string().min(1),
+});
+
+integrationsRouter.get('/mailchimp/status', requireRole('admin', 'manager'), async (req, res, next) => {
+  try {
+    const integrations = await getIntegrationSettings(req.user!.tenantId);
+    const mc = integrations.mailchimp as Record<string, unknown> | undefined;
+    res.json({
+      success: true,
+      data: {
+        connected: !!(mc?.apiKey && mc.audienceId),
+        audienceId: mc?.audienceId,
+        lastSync: mc?.lastSync,
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+integrationsRouter.put('/mailchimp/config', requireRole('admin'), async (req, res, next) => {
+  try {
+    const data = mailchimpConfigSchema.parse(req.body);
+    await updateIntegrationSettings(req.user!.tenantId, 'mailchimp', data as Record<string, unknown>);
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+integrationsRouter.post('/mailchimp/sync', requireRole('admin', 'manager'), async (req, res, next) => {
+  try {
+    const customers = await prisma.customer.findMany({
+      where: { tenantId: req.user!.tenantId, email: { not: null } },
+      select: { id: true },
+    });
+
+    let synced = 0;
+    const errors: string[] = [];
+    for (const c of customers) {
+      try {
+        await syncCustomerToMailchimp(req.user!.tenantId, c.id);
+        synced++;
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : 'Unknown error');
+      }
+    }
+
+    await updateIntegrationSettings(req.user!.tenantId, 'mailchimp', { lastSync: new Date().toISOString() });
+    res.json({ success: true, data: { synced, errors } });
+  } catch (err) { next(err); }
+});
+
+integrationsRouter.delete('/mailchimp/disconnect', requireRole('admin'), async (req, res, next) => {
+  try {
+    await updateIntegrationSettings(req.user!.tenantId, 'mailchimp', { apiKey: null, audienceId: null });
     res.json({ success: true });
   } catch (err) { next(err); }
 });
