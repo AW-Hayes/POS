@@ -30,7 +30,7 @@ interface HeldOrder {
 }
 
 export function TerminalPage() {
-  const { mode, setMode, locationId, sessionId } = useTerminalStore();
+  const { mode, setMode, locationId, sessionId, registerId } = useTerminalStore();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -48,6 +48,10 @@ export function TerminalPage() {
   const [cashDropNote, setCashDropNote] = useState('');
   const [editingPriceIdx, setEditingPriceIdx] = useState<number | null>(null);
   const [priceInput, setPriceInput] = useState('');
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overridePin, setOverridePin] = useState('');
+  const [overrideError, setOverrideError] = useState('');
+  const [overridePending, setOverridePending] = useState(false);
   const barcodeBuffer = useRef('');
   const barcodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -77,6 +81,12 @@ export function TerminalPage() {
     queryKey: ['orders', 'held'],
     queryFn: () => api.get('/held-orders').then((r) => r.data.data),
   });
+
+  const { data: tenant } = useQuery({
+    queryKey: ['tenant', 'current'],
+    queryFn: () => api.get('/tenants/current').then((r) => r.data.data),
+  });
+  const discountThresholdPct = Number((tenant?.settings as Record<string, unknown>)?.discountThresholdPct ?? 0);
 
   // ── Cart helpers ──────────────────────────────────────────────────────────────
 
@@ -446,6 +456,14 @@ export function TerminalPage() {
                   }}
                 >
                   <CardContent className={cn('p-3 flex flex-col gap-1', isTouch ? 'p-4' : '')}>
+                    {(product as { imageUrl?: string }).imageUrl && (
+                      <img
+                        src={(product as { imageUrl?: string }).imageUrl}
+                        alt={product.name}
+                        className="w-full h-20 object-contain rounded mb-1"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    )}
                     <p className={cn('font-medium leading-tight', isTouch ? 'text-base' : 'text-sm')}>
                       {product.name}
                     </p>
@@ -658,7 +676,20 @@ export function TerminalPage() {
             className="w-full"
             size={isTouch ? 'lg' : 'default'}
             disabled={cart.length === 0 || !locationId}
-            onClick={() => setCheckoutOpen(true)}
+            onClick={() => {
+              if (discountThresholdPct > 0) {
+                const maxDiscount = cart.reduce((s, i) => s + (i.price * i.quantity), 0);
+                const totalDiscount = cart.reduce((s, i) => s + (i.discount * i.quantity), 0);
+                const discountPct = maxDiscount > 0 ? (totalDiscount / maxDiscount) * 100 : 0;
+                if (discountPct > discountThresholdPct) {
+                  setOverridePin('');
+                  setOverrideError('');
+                  setOverrideOpen(true);
+                  return;
+                }
+              }
+              setCheckoutOpen(true);
+            }}
           >
             Charge {cart.length > 0 && formatCurrency(subtotal)}
           </Button>
@@ -855,6 +886,79 @@ export function TerminalPage() {
           }}
           onClose={() => setVariantProduct(null)}
         />
+      )}
+
+      {/* ── Manager override dialog ──────────────────────────────────────────── */}
+      {overrideOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setOverrideOpen(false)} />
+          <div className="relative bg-background rounded-lg shadow-xl w-80 p-6 space-y-4">
+            <h3 className="font-semibold">Manager Override Required</h3>
+            <p className="text-sm text-muted-foreground">
+              Discount exceeds the {discountThresholdPct}% threshold. A manager PIN is required to proceed.
+            </p>
+            <Input
+              type="password"
+              autoFocus
+              placeholder="Manager PIN"
+              value={overridePin}
+              onChange={(e) => setOverridePin(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  (async () => {
+                    if (!overridePin.trim() || !registerId) return;
+                    setOverridePending(true);
+                    setOverrideError('');
+                    try {
+                      const res = await api.post('/auth/pin-login', { registerId, pin: overridePin });
+                      const role = res.data.data?.user?.role;
+                      if (role === 'admin' || role === 'manager') {
+                        setOverrideOpen(false);
+                        setCheckoutOpen(true);
+                      } else {
+                        setOverrideError('Insufficient permissions for this PIN.');
+                      }
+                    } catch {
+                      setOverrideError('Invalid PIN. Please try again.');
+                    } finally {
+                      setOverridePending(false);
+                    }
+                  })();
+                }
+              }}
+            />
+            {overrideError && <p className="text-sm text-destructive">{overrideError}</p>}
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setOverrideOpen(false)}>Cancel</Button>
+              <Button
+                className="flex-1"
+                disabled={overridePending || !overridePin.trim()}
+                onClick={async () => {
+                  if (!overridePin.trim() || !registerId) return;
+                  setOverridePending(true);
+                  setOverrideError('');
+                  try {
+                    const res = await api.post('/auth/pin-login', { registerId, pin: overridePin });
+                    const role = res.data.data?.user?.role;
+                    if (role === 'admin' || role === 'manager') {
+                      setOverrideOpen(false);
+                      setCheckoutOpen(true);
+                    } else {
+                      setOverrideError('Insufficient permissions for this PIN.');
+                    }
+                  } catch {
+                    setOverrideError('Invalid PIN. Please try again.');
+                  } finally {
+                    setOverridePending(false);
+                  }
+                }}
+              >
+                {overridePending ? 'Verifying…' : 'Authorize'}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Checkout pipeline modal ──────────────────────────────────────────── */}

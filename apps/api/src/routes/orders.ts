@@ -61,7 +61,7 @@ const createOrderSchema = z.object({
     productId: z.string().optional(),
     variantId: z.string().optional(),
     name: z.string().optional(),   // required when productId is absent (misc item)
-    price: z.number().optional(),  // required when productId is absent (misc item)
+    price: z.number().min(0).optional(),  // required when productId is absent (misc item)
     quantity: z.number().int().positive(),
     discount: z.number().min(0).default(0),
   })).min(1),
@@ -280,6 +280,7 @@ const completeOrderSchema = z.object({
     reference: z.string().optional(),
     giftCardId: z.string().optional(),
   })).min(1),
+  tipAmount: z.number().min(0).default(0),
 });
 
 ordersRouter.post('/:id/complete', async (req, res, next) => {
@@ -291,10 +292,10 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
     if (!order) throw new AppError(404, 'Order not found');
     if (order.status !== 'open') throw new AppError(400, `Order is ${order.status}`);
 
-    const { payments } = completeOrderSchema.parse(req.body);
+    const { payments, tipAmount } = completeOrderSchema.parse(req.body);
     const amountPaid = payments.reduce((s, p) => s + p.amount, 0);
-    if (amountPaid < order.total - 0.01) {
-      throw new AppError(400, `Insufficient payment: ${amountPaid} < ${order.total}`);
+    if (amountPaid < order.total + tipAmount - 0.01) {
+      throw new AppError(400, `Insufficient payment: ${amountPaid} < ${order.total + tipAmount}`);
     }
 
     // Validate and deduct gift card balances
@@ -366,6 +367,7 @@ ordersRouter.post('/:id/complete', async (req, res, next) => {
         data: {
           status: 'completed',
           completedAt: new Date(),
+          tipAmount,
           payments: {
             create: payments.map((p) => ({
               method: p.method,

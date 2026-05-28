@@ -37,6 +37,7 @@ import { cycleCountsRouter } from './routes/cycle-counts';
 import { serviceTicketsRouter } from './routes/service-tickets';
 import { bundlesRouter } from './routes/bundles';
 import { commissionsRouter } from './routes/commissions';
+import { auditRouter } from './routes/audit';
 import { errorHandler } from './middleware/errorHandler';
 import { registerBuiltinHooks } from './hooks';
 
@@ -44,12 +45,17 @@ registerBuiltinHooks();
 
 export const app = express();
 
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 const allowedOrigin = process.env.CORS_ORIGIN;
 if (!allowedOrigin && process.env.NODE_ENV === 'production') {
   throw new Error('CORS_ORIGIN must be set in production');
 }
-app.use(cors({ origin: allowedOrigin ?? '*' }));
+// Always allow the Tauri WebView2 origin alongside any configured origin
+const tauriOrigins = ['https://tauri.localhost', 'tauri://localhost'];
+const corsOrigin = allowedOrigin
+  ? [allowedOrigin, ...tauriOrigins]
+  : (origin: string | undefined, cb: (e: null, allow: boolean) => void) => cb(null, true);
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
@@ -89,5 +95,6 @@ app.use('/api/cycle-counts', cycleCountsRouter);
 app.use('/api/service-tickets', serviceTicketsRouter);
 app.use('/api/bundles', bundlesRouter);
 app.use('/api/commissions', commissionsRouter);
+app.use('/api/audit-log', auditRouter);
 
 app.use(errorHandler);

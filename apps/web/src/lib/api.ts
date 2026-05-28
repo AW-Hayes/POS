@@ -3,7 +3,9 @@ import axios from 'axios';
 // Use the full server URL so this works in both browser dev and the packaged
 // Tauri app (which has no Vite proxy). The API has CORS open to '*' in dev.
 // Set VITE_API_URL at build time to point at a remote server if needed.
-const baseURL = `${import.meta.env.VITE_API_URL ?? 'http://localhost:3001'}/api`;
+// Use 127.0.0.1 (not localhost) — on Windows, WebView2 resolves "localhost"
+// to ::1 (IPv6) while Node.js listens on 0.0.0.0 (IPv4), causing connection failures.
+const baseURL = `${import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:3001'}/api`;
 
 export const api = axios.create({
   baseURL,

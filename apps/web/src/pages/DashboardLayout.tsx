@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/auth';
 import { useTerminalStore } from '@/stores/terminal';
 import { api } from '@/lib/api';
+import { useFeatures } from '@/lib/features';
 import { cn } from '@/lib/utils';
 import { formatCurrency } from '@/lib/utils';
 import {
@@ -16,7 +17,10 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { KeyboardShortcutsHelp } from '@/components/KeyboardShortcutsHelp';
+import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { useGlobalHotkeys } from '@/hooks/useGlobalHotkeys';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { syncPending } from '@/lib/offlineQueue';
 import {
   LayoutDashboard, ShoppingCart, Package, Warehouse, ClipboardList,
   Users, Settings, LogOut, ShoppingBag, BarChart3, Building2,
@@ -45,6 +49,7 @@ type NavItem = {
   label: string;
   icon: React.ElementType;
   minRole?: 'manager' | 'admin';
+  featureKey?: string;
 };
 
 type NavGroup = {
@@ -57,43 +62,43 @@ const allGroups: NavGroup[] = [
     label: 'Sales',
     items: [
       { to: '/orders',          label: 'Orders',          icon: ClipboardList },
-      { to: '/returns',         label: 'Returns',         icon: RotateCcw },
-      { to: '/estimates',       label: 'Estimates',       icon: FileText },
-      { to: '/layaway',         label: 'Layaway',         icon: Archive },
-      { to: '/service-tickets', label: 'Service Tickets', icon: Wrench },
+      { to: '/returns',         label: 'Returns',         icon: RotateCcw,     featureKey: 'returns' },
+      { to: '/estimates',       label: 'Estimates',       icon: FileText,      featureKey: 'estimates' },
+      { to: '/layaway',         label: 'Layaway',         icon: Archive,       featureKey: 'layaway' },
+      { to: '/service-tickets', label: 'Service Tickets', icon: Wrench,        featureKey: 'serviceTickets' },
     ],
   },
   {
     label: 'Catalog',
     items: [
       { to: '/products',     label: 'Products',     icon: Package,        minRole: 'manager' },
-      { to: '/bundles',      label: 'Bundles',      icon: PackageOpen,    minRole: 'manager' },
-      { to: '/inventory',    label: 'Inventory',    icon: Warehouse,      minRole: 'manager' },
-      { to: '/cycle-counts', label: 'Cycle Counts', icon: ClipboardCheck, minRole: 'manager' },
-      { to: '/promotions',   label: 'Promotions',   icon: Tag,            minRole: 'manager' },
-      { to: '/price-levels', label: 'Price Levels', icon: Layers,         minRole: 'manager' },
-      { to: '/gift-cards',   label: 'Gift Cards',   icon: CreditCard,     minRole: 'manager' },
+      { to: '/bundles',      label: 'Bundles',      icon: PackageOpen,    minRole: 'manager', featureKey: 'bundles' },
+      { to: '/inventory',    label: 'Inventory',    icon: Warehouse,      minRole: 'manager', featureKey: 'inventory' },
+      { to: '/cycle-counts', label: 'Cycle Counts', icon: ClipboardCheck, minRole: 'manager', featureKey: 'cycleCounts' },
+      { to: '/promotions',   label: 'Promotions',   icon: Tag,            minRole: 'manager', featureKey: 'promotions' },
+      { to: '/price-levels', label: 'Price Levels', icon: Layers,         minRole: 'manager', featureKey: 'priceLevels' },
+      { to: '/gift-cards',   label: 'Gift Cards',   icon: CreditCard,     minRole: 'manager', featureKey: 'giftCards' },
     ],
   },
   {
     label: 'Customers',
     items: [
-      { to: '/customers', label: 'Customers', icon: Users },
+      { to: '/customers', label: 'Customers', icon: Users, featureKey: 'customers' },
     ],
   },
   {
     label: 'Procurement',
     items: [
-      { to: '/vendors',         label: 'Vendors',         icon: Building2,      minRole: 'manager' },
-      { to: '/purchase-orders', label: 'Purchase Orders', icon: Truck,          minRole: 'manager' },
-      { to: '/stock-transfers', label: 'Stock Transfers', icon: ArrowRightLeft, minRole: 'manager' },
+      { to: '/vendors',         label: 'Vendors',         icon: Building2,      minRole: 'manager', featureKey: 'vendors' },
+      { to: '/purchase-orders', label: 'Purchase Orders', icon: Truck,          minRole: 'manager', featureKey: 'purchaseOrders' },
+      { to: '/stock-transfers', label: 'Stock Transfers', icon: ArrowRightLeft, minRole: 'manager', featureKey: 'stockTransfers' },
     ],
   },
   {
     label: 'Team',
     items: [
-      { to: '/time-clock', label: 'Time Clock', icon: Clock },
-      { to: '/reports',    label: 'Reports',    icon: BarChart3, minRole: 'manager' },
+      { to: '/time-clock', label: 'Time Clock', icon: Clock,    featureKey: 'timeClock' },
+      { to: '/reports',    label: 'Reports',    icon: BarChart3, minRole: 'manager', featureKey: 'reports' },
     ],
   },
 ];
@@ -396,14 +401,49 @@ export function DashboardLayout() {
   const canSee = (minRole?: 'manager' | 'admin') =>
     !minRole || userLevel >= roleLevel[minRole];
 
+  const features = useFeatures();
   const visibleGroups = allGroups
-    .map((g) => ({ ...g, visibleItems: g.items.filter((i) => canSee(i.minRole)) }))
+    .map((g) => ({
+      ...g,
+      visibleItems: g.items.filter(
+        (i) => canSee(i.minRole) && (!i.featureKey || features[i.featureKey] !== false),
+      ),
+    }))
     .filter((g) => g.visibleItems.length > 0);
 
   function handleLogout() {
     logout();
     navigate('/login');
   }
+
+  const { online, pendingCount } = useOnlineStatus();
+
+  const syncMutation = useMutation({
+    mutationFn: () =>
+      syncPending(async (payload) => {
+        const { data: orderRes } = await api.post('/orders', {
+          locationId: payload.locationId,
+          sessionId: payload.sessionId,
+          customerId: payload.customerId,
+          notes: payload.notes,
+          promotionIds: payload.promotionIds,
+          items: payload.items,
+        });
+        const orderId: string = orderRes.data.id;
+        await api.post(`/orders/${orderId}/complete`, { payments: payload.payments });
+        return orderId;
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
+  });
+
+  // Auto-sync when coming back online (track prev state to detect offline→online transition)
+  const prevOnlineRef = useRef(online);
+  useEffect(() => {
+    if (online && !prevOnlineRef.current && pendingCount > 0) {
+      syncMutation.mutate();
+    }
+    prevOnlineRef.current = online;
+  }, [online, pendingCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Global keyboard shortcuts
   useGlobalHotkeys({
@@ -468,6 +508,7 @@ export function DashboardLayout() {
 
         {/* Right side */}
         <div className="ml-auto flex items-center gap-1">
+          <OfflineIndicator online={online} pendingCount={pendingCount} onSynced={() => queryClient.invalidateQueries({ queryKey: ['orders'] })} />
           {/* Session actions */}
           {sessionId && (
             <>

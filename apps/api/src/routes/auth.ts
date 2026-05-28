@@ -1,12 +1,33 @@
-import { Router } from 'express';
+import crypto from 'crypto';
+import { Router, type RequestHandler } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import { rateLimit } from 'express-rate-limit';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../middleware/errorHandler';
 import { authenticate } from '../middleware/auth';
+import { sendMail, passwordResetEmail } from '../lib/mailer';
 
 export const authRouter = Router();
+
+// 10 attempts per 15 minutes per IP — applies to both login endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many login attempts. Please try again in 15 minutes.' },
+});
+
+// PIN login is 4-6 digits — smaller window to limit brute force on the shorter key space
+const pinLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many PIN attempts. Please try again in 15 minutes.' },
+});
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -25,7 +46,7 @@ function signToken(payload: object): string {
   return jwt.sign(payload, secret, { expiresIn: (process.env.JWT_EXPIRES_IN ?? '8h') as any });
 }
 
-authRouter.post('/login', async (req, res, next) => {
+authRouter.post('/login', authLimiter as unknown as RequestHandler, async (req, res, next) => {
   try {
     const { email, password } = loginSchema.parse(req.body);
 
@@ -46,7 +67,7 @@ authRouter.post('/login', async (req, res, next) => {
   }
 });
 
-authRouter.post('/pin-login', async (req, res, next) => {
+authRouter.post('/pin-login', pinLimiter as unknown as RequestHandler, async (req, res, next) => {
   try {
     const { registerId, pin } = pinLoginSchema.parse(req.body);
 
@@ -73,6 +94,53 @@ authRouter.post('/pin-login', async (req, res, next) => {
     const token = signToken({ userId: matched.id, tenantId: matched.tenantId, role: matched.role });
     const { passwordHash: _, pin: __, ...safeUser } = matched;
     res.json({ success: true, data: { token, user: { ...safeUser, hasPin: true } } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const forgotLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many password reset requests. Please try again in an hour.' },
+});
+
+authRouter.post('/forgot-password', forgotLimiter as unknown as RequestHandler, async (req, res, next) => {
+  try {
+    const { email } = z.object({ email: z.string().email() }).parse(req.body);
+    const user = await prisma.user.findFirst({ where: { email, active: true } });
+    if (user) {
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { resetToken: token, resetTokenExpiry: expiry },
+      });
+      const resetUrl = `${process.env.APP_URL ?? 'http://localhost:5173'}/reset-password?token=${token}`;
+      await sendMail(user.email, 'Reset your password', passwordResetEmail(user.name, resetUrl));
+    }
+    // Always return success to avoid email enumeration
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+authRouter.post('/reset-password', async (req, res, next) => {
+  try {
+    const { token, password } = z.object({ token: z.string(), password: z.string().min(8) }).parse(req.body);
+    const user = await prisma.user.findFirst({
+      where: { resetToken: token, resetTokenExpiry: { gt: new Date() }, active: true },
+    });
+    if (!user) throw new AppError(400, 'Invalid or expired reset token');
+    const passwordHash = await bcrypt.hash(password, 12);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash, resetToken: null, resetTokenExpiry: null },
+    });
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }

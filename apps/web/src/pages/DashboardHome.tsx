@@ -3,7 +3,42 @@ import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatCurrency } from '@/lib/utils';
-import { Package, ClipboardList, Users, AlertTriangle, ShoppingCart } from 'lucide-react';
+import { Package, ClipboardList, Users, AlertTriangle, ShoppingCart, TrendingUp } from 'lucide-react';
+
+interface DailyBucket {
+  date: string;
+  revenue: number;
+  orders: number;
+}
+
+function WeeklyRevenueChart({ data }: { data: DailyBucket[] }) {
+  const maxRevenue = Math.max(...data.map((d) => d.revenue), 1);
+  const chartH = 80;
+  const chartW = 280;
+  const barW = Math.floor(chartW / data.length) - 4;
+
+  return (
+    <svg viewBox={`0 0 ${chartW} ${chartH + 20}`} className="w-full" aria-label="Weekly revenue chart">
+      {data.map((bucket, i) => {
+        const barH = Math.max(2, (bucket.revenue / maxRevenue) * chartH);
+        const x = i * (chartW / data.length) + 2;
+        const y = chartH - barH;
+        const label = new Date(bucket.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' });
+        return (
+          <g key={bucket.date}>
+            <rect x={x} y={y} width={barW} height={barH} rx={2} className="fill-primary opacity-80" />
+            <text x={x + barW / 2} y={chartH + 14} textAnchor="middle" fontSize={9} className="fill-muted-foreground">
+              {label}
+            </text>
+            {bucket.revenue > 0 && (
+              <title>{label}: {formatCurrency(bucket.revenue)} ({bucket.orders} orders)</title>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
 
 interface BelowReorderItem {
   id: string;
@@ -50,6 +85,11 @@ export function DashboardHome() {
   const { data: belowReorder } = useQuery({
     queryKey: ['inventory', 'below-reorder'],
     queryFn: () => api.get('/inventory/below-reorder').then((r) => r.data.data as BelowReorderItem[]),
+  });
+
+  const { data: dailySummary } = useQuery({
+    queryKey: ['reports', 'daily-summary'],
+    queryFn: () => api.get('/reports/daily-summary').then((r) => r.data.data as DailyBucket[]),
   });
 
   const stats = [
@@ -118,6 +158,24 @@ export function DashboardHome() {
           </Card>
         ))}
       </div>
+
+      {dailySummary && dailySummary.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-blue-600" />
+              Revenue — Last 7 Days
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <WeeklyRevenueChart data={dailySummary} />
+            <div className="flex justify-between text-xs text-muted-foreground mt-1">
+              <span>Total: {formatCurrency(dailySummary.reduce((s, d) => s + d.revenue, 0))}</span>
+              <span>{dailySummary.reduce((s, d) => s + d.orders, 0)} orders</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {belowReorder && belowReorder.length > 0 && (
         <Card>

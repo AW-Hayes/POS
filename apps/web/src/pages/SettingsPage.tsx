@@ -16,9 +16,12 @@ import {
 import {
   Monitor, Tablet, List, BookOpen, CreditCard, Save,
   Building2, PlusCircle, Pencil, Trash2,
-  Star, Settings, AlertCircle, Keyboard, RotateCcw,
+  Star, Settings, AlertCircle, Keyboard, RotateCcw, ToggleLeft, ToggleRight,
+  Printer, Wifi, WifiOff, Barcode,
 } from 'lucide-react';
 import { DEFAULT_HOTKEYS, loadHotkeyMap, saveHotkeyMap, resetHotkeyMap, eventToKey } from '@/lib/hotkeys';
+import { FEATURE_DEFS, getFeatureFlags } from '@/lib/features';
+import { loadPrinterConfig, savePrinterConfig, sendToPrinter, generateEscPos, openCashDrawer } from '@/lib/printer';
 import type { PaymentTerminalConfig } from '@pos/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -30,16 +33,19 @@ type Tenant = { id: string; name: string; slug: string; settings: Record<string,
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 
-type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard';
+type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard' | 'features' | 'hardware' | 'audit';
 
 const allTabs: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'terminal',  label: 'Terminal' },
   { id: 'keyboard',  label: 'Keyboard' },
+  { id: 'hardware',  label: 'Hardware' },
   { id: 'general',   label: 'General',   adminOnly: true },
   { id: 'locations', label: 'Locations', adminOnly: true },
   { id: 'registers', label: 'Registers', adminOnly: true },
   { id: 'users',     label: 'Users',     adminOnly: true },
   { id: 'loyalty',   label: 'Loyalty',   adminOnly: true },
+  { id: 'features',  label: 'Features',  adminOnly: true },
+  { id: 'audit',     label: 'Audit Log', adminOnly: true },
 ];
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -273,6 +279,13 @@ function GeneralTab() {
   const [taxRate, setTaxRate] = useState('');
   const [currency, setCurrency] = useState('');
   const [timezone, setTimezone] = useState('');
+  const [discountThresholdPct, setDiscountThresholdPct] = useState('');
+  const [receiptStoreName, setReceiptStoreName] = useState('');
+  const [receiptAddress, setReceiptAddress] = useState('');
+  const [receiptPhone, setReceiptPhone] = useState('');
+  const [receiptWebsite, setReceiptWebsite] = useState('');
+  const [receiptHeader, setReceiptHeader] = useState('');
+  const [receiptFooter, setReceiptFooter] = useState('');
   const [saved, setSaved] = useState(false);
   const [initialised, setInitialised] = useState(false);
 
@@ -281,6 +294,13 @@ function GeneralTab() {
     setTaxRate(String(((settings.taxRate as number) ?? 0) * 100));
     setCurrency((settings.currency as string) ?? 'USD');
     setTimezone((settings.timezone as string) ?? 'America/New_York');
+    setDiscountThresholdPct(String(settings.discountThresholdPct ?? ''));
+    setReceiptStoreName((settings.receiptStoreName as string) ?? '');
+    setReceiptAddress((settings.receiptAddress as string) ?? '');
+    setReceiptPhone((settings.receiptPhone as string) ?? '');
+    setReceiptWebsite((settings.receiptWebsite as string) ?? '');
+    setReceiptHeader((settings.receiptHeader as string) ?? '');
+    setReceiptFooter((settings.receiptFooter as string) ?? '');
     setInitialised(true);
   }
 
@@ -293,6 +313,13 @@ function GeneralTab() {
           taxRate: Number(taxRate) / 100,
           currency,
           timezone,
+          discountThresholdPct: discountThresholdPct ? Number(discountThresholdPct) : undefined,
+          receiptStoreName: receiptStoreName || undefined,
+          receiptAddress: receiptAddress || undefined,
+          receiptPhone: receiptPhone || undefined,
+          receiptWebsite: receiptWebsite || undefined,
+          receiptHeader: receiptHeader || undefined,
+          receiptFooter: receiptFooter || undefined,
         },
       }),
     onSuccess: () => {
@@ -311,74 +338,131 @@ function GeneralTab() {
   ];
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Store Settings</CardTitle>
-        <CardDescription>Tenant-wide defaults applied across all locations.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium">Store Name</label>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My Store"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Store Settings</CardTitle>
+          <CardDescription>Tenant-wide defaults applied across all locations.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Currency</label>
-            <Select value={currency} onValueChange={setCurrency}>
+            <label className="text-sm font-medium">Store Name</label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="My Store"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Currency</label>
+              <Select value={currency} onValueChange={setCurrency}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="USD">USD — US Dollar</SelectItem>
+                  <SelectItem value="CAD">CAD — Canadian Dollar</SelectItem>
+                  <SelectItem value="EUR">EUR — Euro</SelectItem>
+                  <SelectItem value="GBP">GBP — British Pound</SelectItem>
+                  <SelectItem value="AUD">AUD — Australian Dollar</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Default Tax Rate (%)</label>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                step={0.001}
+                value={taxRate}
+                onChange={(e) => setTaxRate(e.target.value)}
+                placeholder="8.5"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Timezone</label>
+            <Select value={timezone} onValueChange={setTimezone}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="USD">USD — US Dollar</SelectItem>
-                <SelectItem value="CAD">CAD — Canadian Dollar</SelectItem>
-                <SelectItem value="EUR">EUR — Euro</SelectItem>
-                <SelectItem value="GBP">GBP — British Pound</SelectItem>
-                <SelectItem value="AUD">AUD — Australian Dollar</SelectItem>
+                {TIMEZONES.map((tz) => (
+                  <SelectItem key={tz} value={tz}>{tz}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
+
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Default Tax Rate (%)</label>
+            <label className="text-sm font-medium">Discount Override Threshold (%)</label>
             <Input
               type="number"
               min={0}
               max={100}
-              step={0.001}
-              value={taxRate}
-              onChange={(e) => setTaxRate(e.target.value)}
-              placeholder="8.5"
+              step={1}
+              value={discountThresholdPct}
+              onChange={(e) => setDiscountThresholdPct(e.target.value)}
+              placeholder="e.g. 20 — require manager PIN above this %"
             />
           </div>
-        </div>
 
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium">Timezone</label>
-          <Select value={timezone} onValueChange={setTimezone}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {TIMEZONES.map((tz) => (
-                <SelectItem key={tz} value={tz}>{tz}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+          <div className="flex items-center gap-3">
+            <Button
+              className="gap-2"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+            >
+              <Save className="h-4 w-4" />
+              {saveMutation.isPending ? 'Saving…' : 'Save'}
+            </Button>
+            <SavedBadge saved={saved} />
+          </div>
+        </CardContent>
+      </Card>
 
-        <div className="flex items-center gap-3">
-          <Button
-            className="gap-2"
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending}
-          >
-            <Save className="h-4 w-4" />
-            {saveMutation.isPending ? 'Saving…' : 'Save'}
-          </Button>
-          <SavedBadge saved={saved} />
-        </div>
-      </CardContent>
-    </Card>
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Receipt Customization</CardTitle>
+          <CardDescription>These fields appear on printed and emailed receipts.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Receipt Store Name</label>
+              <Input value={receiptStoreName} onChange={(e) => setReceiptStoreName(e.target.value)} placeholder={name || 'RetailOS'} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Phone</label>
+              <Input value={receiptPhone} onChange={(e) => setReceiptPhone(e.target.value)} placeholder="(555) 123-4567" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Address</label>
+            <Input value={receiptAddress} onChange={(e) => setReceiptAddress(e.target.value)} placeholder="123 Main St, Anytown USA" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Website</label>
+            <Input value={receiptWebsite} onChange={(e) => setReceiptWebsite(e.target.value)} placeholder="www.mystore.com" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Header Message</label>
+            <Input value={receiptHeader} onChange={(e) => setReceiptHeader(e.target.value)} placeholder="Welcome! Returns within 30 days with receipt." />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Footer Message</label>
+            <Input value={receiptFooter} onChange={(e) => setReceiptFooter(e.target.value)} placeholder="Thank you for shopping with us!" />
+          </div>
+          <div className="flex items-center gap-3">
+            <Button className="gap-2" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+              <Save className="h-4 w-4" />
+              {saveMutation.isPending ? 'Saving…' : 'Save Receipt Settings'}
+            </Button>
+            <SavedBadge saved={saved} />
+          </div>
+        </CardContent>
+      </Card>
+    </>
   );
 }
 
@@ -1216,6 +1300,337 @@ function KeyboardTab() {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+// ─── Hardware tab ────────────────────────────────────────────────────────────
+
+function HardwareTab() {
+  const [config, setConfig] = useState(() => loadPrinterConfig());
+  const [saved, setSaved] = useState(false);
+  const [testStatus, setTestStatus] = useState<string | null>(null);
+  const [scanValue, setScanValue] = useState('');
+
+  function save() {
+    savePrinterConfig(config);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function testPrint() {
+    setTestStatus('Printing…');
+    try {
+      const escpos = generateEscPos({
+        storeName: 'RetailOS',
+        orderId: 'TEST0001',
+        completedAt: new Date().toISOString(),
+        items: [{ name: 'Test Item', quantity: 1, price: 9.99, discount: 0 }],
+        subtotal: 9.99,
+        taxAmount: 0.80,
+        total: 10.79,
+        payments: [{ method: 'cash', amount: 11.00 }],
+        change: 0.21,
+        footer: '*** TEST PRINT ***',
+      }, config.charWidth ?? 42);
+      await sendToPrinter(escpos, config);
+      setTestStatus('Done');
+    } catch (e) {
+      setTestStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    setTimeout(() => setTestStatus(null), 3000);
+  }
+
+  async function testDrawer() {
+    setTestStatus('Opening drawer…');
+    try {
+      await openCashDrawer(config);
+      setTestStatus('Signal sent');
+    } catch (e) {
+      setTestStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    setTimeout(() => setTestStatus(null), 3000);
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Receipt Printer */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Printer className="h-5 w-5" /> Receipt Printer
+          </CardTitle>
+          <CardDescription>
+            Configure the thermal receipt printer for this device. Network printers use ESC/POS over TCP (port 9100).
+            Browser Print uses the OS print dialog as a fallback.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Printer Type</label>
+            <select
+              className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+              value={config.type ?? 'browser'}
+              onChange={(e) => setConfig((c) => ({ ...c, type: e.target.value as 'network' | 'browser' }))}
+            >
+              <option value="browser">Browser Print (OS dialog)</option>
+              <option value="network">Network (ESC/POS TCP) — requires Tauri app</option>
+            </select>
+          </div>
+
+          {config.type === 'network' && (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2 space-y-1.5">
+                  <label className="text-sm font-medium">Printer IP Address</label>
+                  <Input
+                    placeholder="192.168.1.100"
+                    value={config.host ?? ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, host: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Port</label>
+                  <Input
+                    type="number"
+                    placeholder="9100"
+                    value={config.port ?? 9100}
+                    onChange={(e) => setConfig((c) => ({ ...c, port: Number(e.target.value) }))}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Paper Width</label>
+            <select
+              className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+              value={config.charWidth ?? 42}
+              onChange={(e) => setConfig((c) => ({ ...c, charWidth: Number(e.target.value) as 32 | 42 }))}
+            >
+              <option value={32}>58mm paper (32 chars)</option>
+              <option value={42}>80mm paper (42 chars)</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3 pt-2">
+            <Button onClick={save}>Save</Button>
+            <Button variant="outline" onClick={testPrint} disabled={testStatus === 'Printing…'}>
+              <Printer className="h-4 w-4 mr-1.5" />
+              Test Print
+            </Button>
+            <SavedBadge saved={saved} />
+            {testStatus && <span className="text-sm text-muted-foreground">{testStatus}</span>}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Cash Drawer */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <span className="text-lg">💰</span> Cash Drawer
+          </CardTitle>
+          <CardDescription>
+            Cash drawers are triggered via an ESC/POS pulse through the receipt printer. Configure the printer above first.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" onClick={testDrawer} disabled={testStatus === 'Opening drawer…'}>
+            Test Open Drawer
+          </Button>
+          {testStatus?.includes('drawer') && (
+            <span className="ml-3 text-sm text-muted-foreground">{testStatus}</span>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Barcode Scanner */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Barcode className="h-5 w-5" /> Barcode Scanner
+          </CardTitle>
+          <CardDescription>
+            Most barcode scanners work as keyboard wedge devices (HID) — they type the barcode value followed by Enter.
+            No configuration is required; just plug in and scan.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm font-medium">Test Scan</p>
+          <p className="text-xs text-muted-foreground">
+            Click the field below, then scan a barcode. The decoded value will appear here.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              placeholder="Scan a barcode here…"
+              value={scanValue}
+              onChange={(e) => setScanValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+              className="font-mono"
+            />
+            <Button variant="outline" onClick={() => setScanValue('')}>Clear</Button>
+          </div>
+          {scanValue && (
+            <div className="flex items-center gap-2 text-sm text-green-600">
+              <Barcode className="h-4 w-4" />
+              Scanned: <span className="font-mono font-medium">{scanValue}</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Features tab ────────────────────────────────────────────────────────────
+
+const FEATURE_GROUPS = ['Sales', 'Catalog', 'Customers', 'Procurement', 'Team'] as const;
+
+function FeaturesTab() {
+  const queryClient = useQueryClient();
+  const { data: tenant } = useTenant();
+  const settings = (tenant?.settings ?? {}) as Record<string, unknown>;
+
+  const [flags, setFlags] = useState<Record<string, boolean>>({});
+  const [initialised, setInitialised] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  if (tenant && !initialised) {
+    setFlags(getFeatureFlags((settings.features ?? {}) as Record<string, boolean>));
+    setInitialised(true);
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      api.patch('/tenants/current', { settings: { ...settings, features: flags } }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tenant', 'current'] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Feature Toggles</CardTitle>
+          <CardDescription>
+            Enable or disable modules to match your workflow. Disabled features are hidden from the navigation.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {FEATURE_GROUPS.map((group) => {
+            const defs = FEATURE_DEFS.filter((d) => d.group === group);
+            return (
+              <div key={group}>
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                  {group}
+                </h3>
+                <div className="space-y-1">
+                  {defs.map((def) => {
+                    const enabled = flags[def.key] ?? true;
+                    return (
+                      <button
+                        key={def.key}
+                        type="button"
+                        onClick={() => setFlags((f) => ({ ...f, [def.key]: !enabled }))}
+                        className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                      >
+                        <div>
+                          <p className="text-sm font-medium">{def.label}</p>
+                          <p className="text-xs text-muted-foreground">{def.description}</p>
+                        </div>
+                        {enabled ? (
+                          <ToggleRight className="h-6 w-6 text-primary shrink-0 ml-4" />
+                        ) : (
+                          <ToggleLeft className="h-6 w-6 text-muted-foreground shrink-0 ml-4" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="flex items-center gap-3 pt-2">
+            <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+              {saveMutation.isPending ? 'Saving…' : 'Save Changes'}
+            </Button>
+            <SavedBadge saved={saved} />
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Audit Log tab ────────────────────────────────────────────────────────────
+
+function AuditLogTab() {
+  const [page, setPage] = useState(1);
+  const { data, isLoading } = useQuery({
+    queryKey: ['audit-log', page],
+    queryFn: () => api.get('/audit-log', { params: { page, pageSize: 50 } }).then((r) => r.data),
+  });
+
+  const entries: Array<{ id: string; action: string; entity: string; entityId?: string; summary?: string; createdAt: string; user?: { name: string } }> = data?.data ?? [];
+  const total: number = data?.total ?? 0;
+  const pageCount: number = data?.pageCount ?? 1;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle>Audit Log</CardTitle>
+        <CardDescription>Admin and manager actions across the system.</CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <p className="p-4 text-sm text-muted-foreground">Loading…</p>
+        ) : entries.length === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">No audit events yet.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left p-3 font-medium">When</th>
+                <th className="text-left p-3 font-medium">User</th>
+                <th className="text-left p-3 font-medium">Action</th>
+                <th className="text-left p-3 font-medium">Entity</th>
+                <th className="text-left p-3 font-medium">Summary</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {entries.map((e) => (
+                <tr key={e.id} className="hover:bg-muted/30">
+                  <td className="p-3 whitespace-nowrap text-muted-foreground text-xs">
+                    {new Date(e.createdAt).toLocaleString()}
+                  </td>
+                  <td className="p-3">{e.user?.name ?? '—'}</td>
+                  <td className="p-3">
+                    <Badge variant="outline" className="text-xs capitalize">{e.action}</Badge>
+                  </td>
+                  <td className="p-3 text-muted-foreground">{e.entity}</td>
+                  <td className="p-3 text-muted-foreground truncate max-w-xs">{e.summary ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {pageCount > 1 && (
+          <div className="flex items-center justify-between p-3 border-t text-sm">
+            <span className="text-muted-foreground">{total} total</span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Prev</Button>
+              <span className="px-2 py-1 text-xs">{page} / {pageCount}</span>
+              <Button size="sm" variant="outline" disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)}>Next</Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
@@ -1225,7 +1640,15 @@ export function SettingsPage() {
     return qTab && allTabs.some((t) => t.id === qTab) ? qTab : 'terminal';
   });
 
-  const visibleTabs = allTabs.filter((t) => !t.adminOnly || isAdmin);
+  const { data: tenant } = useTenant();
+  const tenantSettings = (tenant?.settings ?? {}) as Record<string, unknown>;
+  const features = getFeatureFlags((tenantSettings.features ?? {}) as Record<string, boolean>);
+
+  const visibleTabs = allTabs.filter((t) => {
+    if (t.adminOnly && !isAdmin) return false;
+    if (t.id === 'loyalty' && !features.loyalty) return false;
+    return true;
+  });
 
   return (
     <div className="p-6 max-w-3xl space-y-6">
@@ -1255,11 +1678,14 @@ export function SettingsPage() {
       {/* Tab content */}
       {tab === 'terminal'  && <TerminalTab />}
       {tab === 'keyboard'  && <KeyboardTab />}
+      {tab === 'hardware'  && <HardwareTab />}
       {tab === 'general'   && isAdmin && <GeneralTab />}
       {tab === 'locations' && isAdmin && <LocationsTab />}
       {tab === 'registers' && isAdmin && <RegistersTab />}
       {tab === 'users'     && isAdmin && <UsersTab />}
       {tab === 'loyalty'   && isAdmin && <LoyaltyTab />}
+      {tab === 'features'  && isAdmin && <FeaturesTab />}
+      {tab === 'audit'     && isAdmin && <AuditLogTab />}
     </div>
   );
 }

@@ -5,19 +5,28 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { CheckCircle, Printer, Mail, Check } from 'lucide-react';
+import { CheckCircle, Mail, Check, Printer, WifiOff, Gift } from 'lucide-react';
+import { sendToPrinter, loadPrinterConfig, generateEscPos, generateGiftReceipt } from '@/lib/printer';
 import type { StepProps } from '../types';
 import type { Order } from '@pos/types';
 
 export function ReceiptStep({ state, onAdvance }: StepProps) {
+  const isOfflineOrder = state.orderId?.startsWith('offline:');
+
   const { data: order } = useQuery({
     queryKey: ['orders', state.orderId],
     queryFn: () => api.get(`/orders/${state.orderId}`).then((r) => r.data.data as Order),
-    enabled: !!state.orderId,
+    enabled: !!state.orderId && !isOfflineOrder,
+  });
+
+  const { data: tenant } = useQuery({
+    queryKey: ['tenant', 'current'],
+    queryFn: () => api.get('/tenants/current').then((r) => r.data.data),
   });
 
   const [emailInput, setEmailInput] = useState('');
   const [emailSent, setEmailSent] = useState(false);
+  const tipAmount = (state.meta.tipAmount as number | undefined) ?? 0;
 
   const emailMutation = useMutation({
     mutationFn: (email: string) =>
@@ -31,19 +40,52 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
 
   const customerEmail = (order?.customer as { email?: string | null } | undefined)?.email ?? undefined;
 
-  function handlePrint() {
-    window.print();
+  const settings = tenant?.settings as Record<string, string> | undefined;
+
+  function buildReceiptData() {
+    return {
+      storeName: settings?.receiptStoreName ?? tenant?.name ?? 'RetailOS',
+      orderId: state.orderId ?? 'OFFLINE',
+      completedAt: order?.completedAt ?? new Date().toISOString(),
+      items: state.cart.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price, discount: i.discount })),
+      subtotal,
+      taxAmount: order?.taxAmount ?? 0,
+      tipAmount: tipAmount > 0 ? tipAmount : undefined,
+      total: order?.total ?? subtotal,
+      payments: state.payments.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference })),
+      change: change > 0 ? change : undefined,
+      storeAddress: settings?.receiptAddress,
+      storePhone: settings?.receiptPhone,
+      storeWebsite: settings?.receiptWebsite,
+      receiptHeader: settings?.receiptHeader,
+      footer: settings?.receiptFooter,
+    };
+  }
+
+  async function handlePrint() {
+    const config = loadPrinterConfig();
+    await sendToPrinter(generateEscPos(buildReceiptData(), config.charWidth ?? 42), config);
+  }
+
+  async function handleGiftReceipt() {
+    const config = loadPrinterConfig();
+    await sendToPrinter(generateGiftReceipt(buildReceiptData(), config.charWidth ?? 42), config);
   }
 
   return (
     <div className="space-y-4">
       <div className="text-center space-y-1">
         <div className="flex justify-center">
-          <div className="rounded-full bg-green-100 p-3">
-            <CheckCircle className="h-8 w-8 text-green-600" />
+          <div className={`rounded-full p-3 ${isOfflineOrder ? 'bg-amber-100' : 'bg-green-100'}`}>
+            {isOfflineOrder
+              ? <WifiOff className="h-8 w-8 text-amber-600" />
+              : <CheckCircle className="h-8 w-8 text-green-600" />}
           </div>
         </div>
-        <p className="font-semibold text-lg">Order Complete</p>
+        <p className="font-semibold text-lg">{isOfflineOrder ? 'Saved Offline' : 'Order Complete'}</p>
+        {isOfflineOrder && (
+          <p className="text-xs text-amber-600">This order will sync automatically when back online.</p>
+        )}
         {order && (
           <p className="text-xs text-muted-foreground font-mono">
             #{order.id.slice(-8).toUpperCase()}
@@ -72,6 +114,12 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
               <div className="flex justify-between px-3 py-2 text-muted-foreground">
                 <span>Tax</span>
                 <span className="tabular-nums">{formatCurrency(order.taxAmount)}</span>
+              </div>
+            )}
+            {tipAmount > 0 && (
+              <div className="flex justify-between px-3 py-2 text-muted-foreground">
+                <span>Tip</span>
+                <span className="tabular-nums">{formatCurrency(tipAmount)}</span>
               </div>
             )}
             <div className="flex justify-between px-3 py-2 font-semibold">
@@ -151,6 +199,10 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
         <Button variant="outline" className="flex items-center gap-2" onClick={handlePrint}>
           <Printer className="h-4 w-4" />
           Print
+        </Button>
+        <Button variant="outline" className="flex items-center gap-2" onClick={handleGiftReceipt}>
+          <Gift className="h-4 w-4" />
+          Gift
         </Button>
         <Button className="flex-1" onClick={() => onAdvance()}>
           New Order
