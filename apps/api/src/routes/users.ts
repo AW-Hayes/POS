@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { authenticate, requireRole } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
+import { audit } from '../lib/audit';
 
 export const usersRouter = Router();
 usersRouter.use(authenticate);
@@ -55,6 +56,7 @@ usersRouter.post('/', requireRole('admin'), async (req, res, next) => {
       },
       select: { id: true, name: true, email: true, role: true, createdAt: true, updatedAt: true },
     });
+    void audit(req, { action: 'create', entity: 'User', entityId: user.id, summary: `Created user ${user.email} (${user.role})` });
     res.status(201).json({ success: true, data: user });
   } catch (err) {
     next(err);
@@ -93,6 +95,13 @@ usersRouter.patch('/:id', requireRole('admin'), async (req, res, next) => {
       },
       select: { id: true, name: true, email: true, role: true, createdAt: true, updatedAt: true },
     });
+    const changes: Record<string, unknown> = {};
+    if (rest.name && rest.name !== existing.name) changes.name = { from: existing.name, to: rest.name };
+    if (rest.email && rest.email !== existing.email) changes.email = { from: existing.email, to: rest.email };
+    if (rest.role && rest.role !== existing.role) changes.role = { from: existing.role, to: rest.role };
+    if (passwordHash) changes.password = 'changed';
+    if (hashedPin) changes.pin = 'changed';
+    void audit(req, { action: 'update', entity: 'User', entityId: user.id, summary: `Updated user ${user.email}`, changes });
     res.json({ success: true, data: user });
   } catch (err) {
     next(err);

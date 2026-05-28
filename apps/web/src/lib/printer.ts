@@ -15,10 +15,15 @@ export interface ReceiptData {
   items: Array<{ name: string; quantity: number; price: number; discount: number }>;
   subtotal: number;
   taxAmount: number;
+  tipAmount?: number;
   total: number;
   payments: Array<{ method: string; amount: number; reference?: string }>;
   change?: number;
   customerName?: string;
+  storeAddress?: string;
+  storePhone?: string;
+  storeWebsite?: string;
+  receiptHeader?: string;
   footer?: string;
 }
 
@@ -60,6 +65,10 @@ export function generateEscPos(data: ReceiptData, charWidth = 42): string {
   doc += ALIGN_CENTER + DOUBLE_HEIGHT_ON + BOLD_ON;
   doc += data.storeName.slice(0, w / 2) + LF;
   doc += DOUBLE_HEIGHT_OFF + BOLD_OFF;
+  if (data.storeAddress) doc += data.storeAddress + LF;
+  if (data.storePhone) doc += data.storePhone + LF;
+  if (data.storeWebsite) doc += data.storeWebsite + LF;
+  if (data.receiptHeader) doc += data.receiptHeader + LF;
   doc += new Date(data.completedAt).toLocaleString() + LF;
   if (data.customerName) doc += data.customerName + LF;
   doc += ALIGN_LEFT;
@@ -81,6 +90,9 @@ export function generateEscPos(data: ReceiptData, charWidth = 42): string {
   if (data.taxAmount > 0) {
     doc += pad('Tax', `$${data.taxAmount.toFixed(2)}`, w) + LF;
   }
+  if (data.tipAmount && data.tipAmount > 0) {
+    doc += pad('Tip', `$${data.tipAmount.toFixed(2)}`, w) + LF;
+  }
   doc += BOLD_ON + pad('TOTAL', `$${data.total.toFixed(2)}`, w) + LF + BOLD_OFF;
   doc += divider(w);
 
@@ -94,6 +106,33 @@ export function generateEscPos(data: ReceiptData, charWidth = 42): string {
   }
 
   // Footer
+  doc += divider(w);
+  doc += ALIGN_CENTER;
+  doc += (data.footer ?? 'Thank you for your purchase!') + LF;
+  doc += `Order #${data.orderId.slice(-8).toUpperCase()}` + LF;
+  doc += LF + LF + LF;
+  doc += CUT;
+
+  return doc;
+}
+
+export function generateGiftReceipt(data: ReceiptData, charWidth = 42): string {
+  const w = charWidth;
+  let doc = INIT;
+
+  doc += ALIGN_CENTER + DOUBLE_HEIGHT_ON + BOLD_ON;
+  doc += data.storeName.slice(0, w / 2) + LF;
+  doc += DOUBLE_HEIGHT_OFF + BOLD_OFF;
+  doc += 'GIFT RECEIPT' + LF;
+  doc += new Date(data.completedAt).toLocaleString() + LF;
+  doc += ALIGN_LEFT;
+  doc += divider(w);
+
+  for (const item of data.items) {
+    const name = item.quantity > 1 ? `${item.name} x${item.quantity}` : item.name;
+    doc += line(name, w);
+  }
+
   doc += divider(w);
   doc += ALIGN_CENTER;
   doc += (data.footer ?? 'Thank you for your purchase!') + LF;

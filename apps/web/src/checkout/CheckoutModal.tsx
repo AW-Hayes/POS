@@ -82,6 +82,7 @@ export function CheckoutModal({
       // Complete the order with payments
       await api.post(`/orders/${orderId}/complete`, {
         payments: hooked.payments,
+        tipAmount: (hooked.meta.tipAmount as number) ?? 0,
       });
 
       // ── pipeline:after-submit hook ─────────────────────────────────────────

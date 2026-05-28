@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import axios from 'axios';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -91,6 +91,11 @@ export function LoginPage() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Signing in…' : 'Sign In'}
             </Button>
+            <div className="text-center">
+              <Link to="/forgot-password" className="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2">
+                Forgot password?
+              </Link>
+            </div>
           </form>
         </CardContent>
       </Card>

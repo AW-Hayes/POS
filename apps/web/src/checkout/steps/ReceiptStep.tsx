@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { CheckCircle, Mail, Check, Printer, WifiOff } from 'lucide-react';
-import { sendToPrinter, loadPrinterConfig, generateEscPos } from '@/lib/printer';
+import { CheckCircle, Mail, Check, Printer, WifiOff, Gift } from 'lucide-react';
+import { sendToPrinter, loadPrinterConfig, generateEscPos, generateGiftReceipt } from '@/lib/printer';
 import type { StepProps } from '../types';
 import type { Order } from '@pos/types';
 
@@ -19,8 +19,14 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
     enabled: !!state.orderId && !isOfflineOrder,
   });
 
+  const { data: tenant } = useQuery({
+    queryKey: ['tenant', 'current'],
+    queryFn: () => api.get('/tenants/current').then((r) => r.data.data),
+  });
+
   const [emailInput, setEmailInput] = useState('');
   const [emailSent, setEmailSent] = useState(false);
+  const tipAmount = (state.meta.tipAmount as number | undefined) ?? 0;
 
   const emailMutation = useMutation({
     mutationFn: (email: string) =>
@@ -34,20 +40,36 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
 
   const customerEmail = (order?.customer as { email?: string | null } | undefined)?.email ?? undefined;
 
-  async function handlePrint() {
-    const config = loadPrinterConfig();
-    const receiptData = {
-      storeName: 'RetailOS',
+  const settings = tenant?.settings as Record<string, string> | undefined;
+
+  function buildReceiptData() {
+    return {
+      storeName: settings?.receiptStoreName ?? tenant?.name ?? 'RetailOS',
       orderId: state.orderId ?? 'OFFLINE',
       completedAt: order?.completedAt ?? new Date().toISOString(),
       items: state.cart.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price, discount: i.discount })),
       subtotal,
       taxAmount: order?.taxAmount ?? 0,
+      tipAmount: tipAmount > 0 ? tipAmount : undefined,
       total: order?.total ?? subtotal,
       payments: state.payments.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference })),
       change: change > 0 ? change : undefined,
+      storeAddress: settings?.receiptAddress,
+      storePhone: settings?.receiptPhone,
+      storeWebsite: settings?.receiptWebsite,
+      receiptHeader: settings?.receiptHeader,
+      footer: settings?.receiptFooter,
     };
-    await sendToPrinter(generateEscPos(receiptData, config.charWidth ?? 42), config);
+  }
+
+  async function handlePrint() {
+    const config = loadPrinterConfig();
+    await sendToPrinter(generateEscPos(buildReceiptData(), config.charWidth ?? 42), config);
+  }
+
+  async function handleGiftReceipt() {
+    const config = loadPrinterConfig();
+    await sendToPrinter(generateGiftReceipt(buildReceiptData(), config.charWidth ?? 42), config);
   }
 
   return (
@@ -92,6 +114,12 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
               <div className="flex justify-between px-3 py-2 text-muted-foreground">
                 <span>Tax</span>
                 <span className="tabular-nums">{formatCurrency(order.taxAmount)}</span>
+              </div>
+            )}
+            {tipAmount > 0 && (
+              <div className="flex justify-between px-3 py-2 text-muted-foreground">
+                <span>Tip</span>
+                <span className="tabular-nums">{formatCurrency(tipAmount)}</span>
               </div>
             )}
             <div className="flex justify-between px-3 py-2 font-semibold">
@@ -171,6 +199,10 @@ export function ReceiptStep({ state, onAdvance }: StepProps) {
         <Button variant="outline" className="flex items-center gap-2" onClick={handlePrint}>
           <Printer className="h-4 w-4" />
           Print
+        </Button>
+        <Button variant="outline" className="flex items-center gap-2" onClick={handleGiftReceipt}>
+          <Gift className="h-4 w-4" />
+          Gift
         </Button>
         <Button className="flex-1" onClick={() => onAdvance()}>
           New Order

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router, type RequestHandler } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -6,6 +7,7 @@ import { rateLimit } from 'express-rate-limit';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../middleware/errorHandler';
 import { authenticate } from '../middleware/auth';
+import { sendMail, passwordResetEmail } from '../lib/mailer';
 
 export const authRouter = Router();
 
@@ -92,6 +94,53 @@ authRouter.post('/pin-login', pinLimiter as unknown as RequestHandler, async (re
     const token = signToken({ userId: matched.id, tenantId: matched.tenantId, role: matched.role });
     const { passwordHash: _, pin: __, ...safeUser } = matched;
     res.json({ success: true, data: { token, user: { ...safeUser, hasPin: true } } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const forgotLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many password reset requests. Please try again in an hour.' },
+});
+
+authRouter.post('/forgot-password', forgotLimiter as unknown as RequestHandler, async (req, res, next) => {
+  try {
+    const { email } = z.object({ email: z.string().email() }).parse(req.body);
+    const user = await prisma.user.findFirst({ where: { email, active: true } });
+    if (user) {
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { resetToken: token, resetTokenExpiry: expiry },
+      });
+      const resetUrl = `${process.env.APP_URL ?? 'http://localhost:5173'}/reset-password?token=${token}`;
+      await sendMail(user.email, 'Reset your password', passwordResetEmail(user.name, resetUrl));
+    }
+    // Always return success to avoid email enumeration
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+authRouter.post('/reset-password', async (req, res, next) => {
+  try {
+    const { token, password } = z.object({ token: z.string(), password: z.string().min(8) }).parse(req.body);
+    const user = await prisma.user.findFirst({
+      where: { resetToken: token, resetTokenExpiry: { gt: new Date() }, active: true },
+    });
+    if (!user) throw new AppError(400, 'Invalid or expired reset token');
+    const passwordHash = await bcrypt.hash(password, 12);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash, resetToken: null, resetTokenExpiry: null },
+    });
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }

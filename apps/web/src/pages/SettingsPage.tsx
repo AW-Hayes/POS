@@ -33,7 +33,7 @@ type Tenant = { id: string; name: string; slug: string; settings: Record<string,
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 
-type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard' | 'features' | 'hardware';
+type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard' | 'features' | 'hardware' | 'audit';
 
 const allTabs: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'terminal',  label: 'Terminal' },
@@ -45,6 +45,7 @@ const allTabs: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'users',     label: 'Users',     adminOnly: true },
   { id: 'loyalty',   label: 'Loyalty',   adminOnly: true },
   { id: 'features',  label: 'Features',  adminOnly: true },
+  { id: 'audit',     label: 'Audit Log', adminOnly: true },
 ];
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -278,6 +279,13 @@ function GeneralTab() {
   const [taxRate, setTaxRate] = useState('');
   const [currency, setCurrency] = useState('');
   const [timezone, setTimezone] = useState('');
+  const [discountThresholdPct, setDiscountThresholdPct] = useState('');
+  const [receiptStoreName, setReceiptStoreName] = useState('');
+  const [receiptAddress, setReceiptAddress] = useState('');
+  const [receiptPhone, setReceiptPhone] = useState('');
+  const [receiptWebsite, setReceiptWebsite] = useState('');
+  const [receiptHeader, setReceiptHeader] = useState('');
+  const [receiptFooter, setReceiptFooter] = useState('');
   const [saved, setSaved] = useState(false);
   const [initialised, setInitialised] = useState(false);
 
@@ -286,6 +294,13 @@ function GeneralTab() {
     setTaxRate(String(((settings.taxRate as number) ?? 0) * 100));
     setCurrency((settings.currency as string) ?? 'USD');
     setTimezone((settings.timezone as string) ?? 'America/New_York');
+    setDiscountThresholdPct(String(settings.discountThresholdPct ?? ''));
+    setReceiptStoreName((settings.receiptStoreName as string) ?? '');
+    setReceiptAddress((settings.receiptAddress as string) ?? '');
+    setReceiptPhone((settings.receiptPhone as string) ?? '');
+    setReceiptWebsite((settings.receiptWebsite as string) ?? '');
+    setReceiptHeader((settings.receiptHeader as string) ?? '');
+    setReceiptFooter((settings.receiptFooter as string) ?? '');
     setInitialised(true);
   }
 
@@ -298,6 +313,13 @@ function GeneralTab() {
           taxRate: Number(taxRate) / 100,
           currency,
           timezone,
+          discountThresholdPct: discountThresholdPct ? Number(discountThresholdPct) : undefined,
+          receiptStoreName: receiptStoreName || undefined,
+          receiptAddress: receiptAddress || undefined,
+          receiptPhone: receiptPhone || undefined,
+          receiptWebsite: receiptWebsite || undefined,
+          receiptHeader: receiptHeader || undefined,
+          receiptFooter: receiptFooter || undefined,
         },
       }),
     onSuccess: () => {
@@ -316,74 +338,131 @@ function GeneralTab() {
   ];
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Store Settings</CardTitle>
-        <CardDescription>Tenant-wide defaults applied across all locations.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium">Store Name</label>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My Store"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Store Settings</CardTitle>
+          <CardDescription>Tenant-wide defaults applied across all locations.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Currency</label>
-            <Select value={currency} onValueChange={setCurrency}>
+            <label className="text-sm font-medium">Store Name</label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="My Store"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Currency</label>
+              <Select value={currency} onValueChange={setCurrency}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="USD">USD — US Dollar</SelectItem>
+                  <SelectItem value="CAD">CAD — Canadian Dollar</SelectItem>
+                  <SelectItem value="EUR">EUR — Euro</SelectItem>
+                  <SelectItem value="GBP">GBP — British Pound</SelectItem>
+                  <SelectItem value="AUD">AUD — Australian Dollar</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Default Tax Rate (%)</label>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                step={0.001}
+                value={taxRate}
+                onChange={(e) => setTaxRate(e.target.value)}
+                placeholder="8.5"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Timezone</label>
+            <Select value={timezone} onValueChange={setTimezone}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="USD">USD — US Dollar</SelectItem>
-                <SelectItem value="CAD">CAD — Canadian Dollar</SelectItem>
-                <SelectItem value="EUR">EUR — Euro</SelectItem>
-                <SelectItem value="GBP">GBP — British Pound</SelectItem>
-                <SelectItem value="AUD">AUD — Australian Dollar</SelectItem>
+                {TIMEZONES.map((tz) => (
+                  <SelectItem key={tz} value={tz}>{tz}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
+
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Default Tax Rate (%)</label>
+            <label className="text-sm font-medium">Discount Override Threshold (%)</label>
             <Input
               type="number"
               min={0}
               max={100}
-              step={0.001}
-              value={taxRate}
-              onChange={(e) => setTaxRate(e.target.value)}
-              placeholder="8.5"
+              step={1}
+              value={discountThresholdPct}
+              onChange={(e) => setDiscountThresholdPct(e.target.value)}
+              placeholder="e.g. 20 — require manager PIN above this %"
             />
           </div>
-        </div>
 
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium">Timezone</label>
-          <Select value={timezone} onValueChange={setTimezone}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {TIMEZONES.map((tz) => (
-                <SelectItem key={tz} value={tz}>{tz}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+          <div className="flex items-center gap-3">
+            <Button
+              className="gap-2"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+            >
+              <Save className="h-4 w-4" />
+              {saveMutation.isPending ? 'Saving…' : 'Save'}
+            </Button>
+            <SavedBadge saved={saved} />
+          </div>
+        </CardContent>
+      </Card>
 
-        <div className="flex items-center gap-3">
-          <Button
-            className="gap-2"
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending}
-          >
-            <Save className="h-4 w-4" />
-            {saveMutation.isPending ? 'Saving…' : 'Save'}
-          </Button>
-          <SavedBadge saved={saved} />
-        </div>
-      </CardContent>
-    </Card>
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Receipt Customization</CardTitle>
+          <CardDescription>These fields appear on printed and emailed receipts.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Receipt Store Name</label>
+              <Input value={receiptStoreName} onChange={(e) => setReceiptStoreName(e.target.value)} placeholder={name || 'RetailOS'} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Phone</label>
+              <Input value={receiptPhone} onChange={(e) => setReceiptPhone(e.target.value)} placeholder="(555) 123-4567" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Address</label>
+            <Input value={receiptAddress} onChange={(e) => setReceiptAddress(e.target.value)} placeholder="123 Main St, Anytown USA" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Website</label>
+            <Input value={receiptWebsite} onChange={(e) => setReceiptWebsite(e.target.value)} placeholder="www.mystore.com" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Header Message</label>
+            <Input value={receiptHeader} onChange={(e) => setReceiptHeader(e.target.value)} placeholder="Welcome! Returns within 30 days with receipt." />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Footer Message</label>
+            <Input value={receiptFooter} onChange={(e) => setReceiptFooter(e.target.value)} placeholder="Thank you for shopping with us!" />
+          </div>
+          <div className="flex items-center gap-3">
+            <Button className="gap-2" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+              <Save className="h-4 w-4" />
+              {saveMutation.isPending ? 'Saving…' : 'Save Receipt Settings'}
+            </Button>
+            <SavedBadge saved={saved} />
+          </div>
+        </CardContent>
+      </Card>
+    </>
   );
 }
 
@@ -1485,6 +1564,73 @@ function FeaturesTab() {
   );
 }
 
+// ─── Audit Log tab ────────────────────────────────────────────────────────────
+
+function AuditLogTab() {
+  const [page, setPage] = useState(1);
+  const { data, isLoading } = useQuery({
+    queryKey: ['audit-log', page],
+    queryFn: () => api.get('/audit-log', { params: { page, pageSize: 50 } }).then((r) => r.data),
+  });
+
+  const entries: Array<{ id: string; action: string; entity: string; entityId?: string; summary?: string; createdAt: string; user?: { name: string } }> = data?.data ?? [];
+  const total: number = data?.total ?? 0;
+  const pageCount: number = data?.pageCount ?? 1;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle>Audit Log</CardTitle>
+        <CardDescription>Admin and manager actions across the system.</CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <p className="p-4 text-sm text-muted-foreground">Loading…</p>
+        ) : entries.length === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">No audit events yet.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left p-3 font-medium">When</th>
+                <th className="text-left p-3 font-medium">User</th>
+                <th className="text-left p-3 font-medium">Action</th>
+                <th className="text-left p-3 font-medium">Entity</th>
+                <th className="text-left p-3 font-medium">Summary</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {entries.map((e) => (
+                <tr key={e.id} className="hover:bg-muted/30">
+                  <td className="p-3 whitespace-nowrap text-muted-foreground text-xs">
+                    {new Date(e.createdAt).toLocaleString()}
+                  </td>
+                  <td className="p-3">{e.user?.name ?? '—'}</td>
+                  <td className="p-3">
+                    <Badge variant="outline" className="text-xs capitalize">{e.action}</Badge>
+                  </td>
+                  <td className="p-3 text-muted-foreground">{e.entity}</td>
+                  <td className="p-3 text-muted-foreground truncate max-w-xs">{e.summary ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {pageCount > 1 && (
+          <div className="flex items-center justify-between p-3 border-t text-sm">
+            <span className="text-muted-foreground">{total} total</span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Prev</Button>
+              <span className="px-2 py-1 text-xs">{page} / {pageCount}</span>
+              <Button size="sm" variant="outline" disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)}>Next</Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
@@ -1539,6 +1685,7 @@ export function SettingsPage() {
       {tab === 'users'     && isAdmin && <UsersTab />}
       {tab === 'loyalty'   && isAdmin && <LoyaltyTab />}
       {tab === 'features'  && isAdmin && <FeaturesTab />}
+      {tab === 'audit'     && isAdmin && <AuditLogTab />}
     </div>
   );
 }

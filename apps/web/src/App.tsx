@@ -24,6 +24,8 @@ import { CycleCountPage } from '@/pages/CycleCountPage';
 import { ServiceTicketsPage } from '@/pages/ServiceTicketsPage';
 import { BundlesPage } from '@/pages/BundlesPage';
 import { StockTransfersPage } from '@/pages/StockTransfersPage';
+import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage';
+import { ResetPasswordPage } from '@/pages/ResetPasswordPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -41,6 +43,8 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route
           path="/"
           element={

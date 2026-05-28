@@ -444,6 +444,32 @@ reportsRouter.get('/sales-by-employee', async (req, res, next) => {
   }
 });
 
+// ─── Daily summary (last 7 days) ─────────────────────────────────────────────
+
+reportsRouter.get('/daily-summary', async (req, res, next) => {
+  try {
+    const daysAgo = new Date();
+    daysAgo.setDate(daysAgo.getDate() - 6);
+    daysAgo.setHours(0, 0, 0, 0);
+    const orders = await prisma.order.findMany({
+      where: { tenantId: req.user!.tenantId, status: 'completed', completedAt: { gte: daysAgo } },
+      select: { total: true, completedAt: true },
+    });
+    const buckets: Record<string, { revenue: number; orders: number }> = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      buckets[key] = { revenue: 0, orders: 0 };
+    }
+    for (const o of orders) {
+      if (!o.completedAt) continue;
+      const key = o.completedAt.toISOString().slice(0, 10);
+      if (buckets[key]) { buckets[key].revenue += o.total; buckets[key].orders += 1; }
+    }
+    res.json({ success: true, data: Object.entries(buckets).map(([date, v]) => ({ date, ...v })) });
+  } catch (err) { next(err); }
+});
+
 // ─── Tax liability ────────────────────────────────────────────────────────────
 
 reportsRouter.get('/tax-liability', async (req, res, next) => {
