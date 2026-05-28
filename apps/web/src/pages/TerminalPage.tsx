@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 import {
   Search, Plus, Minus, Trash2, Tablet,
   AlertCircle, List, Grid3x3, BookOpen, PauseCircle,
-  FileText, DollarSign, PackagePlus,
+  FileText, DollarSign, PackagePlus, Monitor,
 } from 'lucide-react';
 import type { Product } from '@pos/types';
 import { CheckoutModal } from '@/checkout';
@@ -208,16 +208,39 @@ export function TerminalPage() {
 
   const subtotal = cart.reduce((s, i) => s + (i.price - i.discount) * i.quantity, 0);
 
+  // Broadcast cart state to customer-facing display
+  useEffect(() => {
+    const ch = new BroadcastChannel('pos-display');
+    if (cart.length === 0) {
+      ch.postMessage({ type: 'idle' });
+    } else {
+      ch.postMessage({
+        type: 'cart',
+        items: cart.map((i) => ({ name: i.name, quantity: i.quantity, price: i.price, discount: i.discount })),
+        subtotal,
+      });
+    }
+    ch.close();
+  }, [cart, subtotal]);
+
   const hasCostData = cart.some((i) => i.cost != null);
   const costBasisTotal = cart.reduce((s, i) => s + (i.cost != null ? i.cost * i.quantity : 0), 0);
   const revBasisTotal = cart.reduce((s, i) => s + (i.cost != null ? (i.price - i.discount) * i.quantity : 0), 0);
   const cartGP = revBasisTotal - costBasisTotal;
   const cartGPPct = revBasisTotal > 0 ? (cartGP / revBasisTotal) * 100 : 0;
 
-  function handleOrderComplete() {
+  function handleOrderComplete(total?: number) {
+    const ch = new BroadcastChannel('pos-display');
+    ch.postMessage({ type: 'complete', total: total ?? subtotal });
+    ch.close();
     setCart([]);
     queryClient.invalidateQueries({ queryKey: ['orders'] });
     queryClient.invalidateQueries({ queryKey: ['inventory'] });
+  }
+
+  function openCustomerDisplay() {
+    const params = new URLSearchParams({ store: (tenant as { name?: string } | undefined)?.name ?? 'RetailOS' });
+    window.open(`/display?${params}`, 'pos-customer-display', 'width=900,height=600,scrollbars=no');
   }
 
   // ── Hold order ────────────────────────────────────────────────────────────────
@@ -375,6 +398,16 @@ export function TerminalPage() {
           >
             <PackagePlus className="h-3.5 w-3.5" />
             Misc
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0 gap-1"
+            title="Open customer-facing display in a new window"
+            onClick={openCustomerDisplay}
+          >
+            <Monitor className="h-3.5 w-3.5" />
+            Display
           </Button>
           {!isGrid && <span className="flex-1 text-sm font-medium text-muted-foreground">{mode === 'line-item' ? 'Line Item Entry' : 'QuickFind'}</span>}
 
