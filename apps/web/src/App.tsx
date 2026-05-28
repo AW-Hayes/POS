@@ -26,6 +26,7 @@ import { BundlesPage } from '@/pages/BundlesPage';
 import { StockTransfersPage } from '@/pages/StockTransfersPage';
 import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage';
+import { CustomerDisplayPage } from '@/pages/CustomerDisplayPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/display" element={<CustomerDisplayPage />} />
         <Route
           path="/"
           element={

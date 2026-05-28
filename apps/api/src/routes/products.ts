@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { parse as parseCsv } from 'csv-parse/sync';
 import { prisma } from '../lib/prisma';
 import { authenticate, requireRole } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
@@ -285,3 +286,86 @@ function cartesian<T>(arrays: T[][]): T[][] {
     [[]],
   );
 }
+
+// ─── Product CSV import ───────────────────────────────────────────────────────
+// Accepts { csv: string } — frontend reads the file and sends raw text.
+// Required columns: name, price
+// Optional: sku, barcode, cost, description, category, taxable, imageUrl
+
+productsRouter.post('/import-csv', requireRole('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { csv } = z.object({ csv: z.string().min(1) }).parse(req.body);
+
+    let rows: Record<string, string>[];
+    try {
+      rows = parseCsv(csv, { columns: true, skip_empty_lines: true, trim: true }) as Record<string, string>[];
+    } catch {
+      throw new AppError(400, 'Invalid CSV format');
+    }
+
+    // Pre-load categories for name lookup
+    const categories = await prisma.category.findMany({
+      where: { tenantId: req.user!.tenantId },
+      select: { id: true, name: true },
+    });
+    const categoryMap = new Map(categories.map((c) => [c.name.toLowerCase(), c.id]));
+
+    let created = 0;
+    let updated = 0;
+    const errors: Array<{ row: number; error: string }> = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 2; // 1-indexed + header
+
+      try {
+        const name = row['name']?.trim();
+        if (!name) { errors.push({ row: rowNum, error: 'name is required' }); continue; }
+
+        const price = parseFloat(row['price'] ?? '');
+        if (isNaN(price) || price < 0) { errors.push({ row: rowNum, error: 'price must be a non-negative number' }); continue; }
+
+        const sku = row['sku']?.trim() || undefined;
+        const barcode = row['barcode']?.trim() || undefined;
+        const cost = row['cost'] ? parseFloat(row['cost']) : undefined;
+        const imageUrl = row['imageUrl']?.trim() || row['image_url']?.trim() || undefined;
+        const taxable = row['taxable'] ? row['taxable'].trim().toLowerCase() !== 'false' && row['taxable'].trim() !== '0' : true;
+        const description = row['description']?.trim() || undefined;
+
+        // Resolve category by name
+        const categoryName = row['category']?.trim().toLowerCase();
+        const categoryId = categoryName ? categoryMap.get(categoryName) : undefined;
+
+        // Upsert by SKU (within tenant), or create new if no SKU
+        if (sku) {
+          const existing = await prisma.product.findFirst({
+            where: { tenantId: req.user!.tenantId, sku },
+          });
+          if (existing) {
+            await prisma.product.update({
+              where: { id: existing.id },
+              data: { name, price, ...(cost != null ? { cost } : {}), taxable, description, barcode, imageUrl, categoryId },
+            });
+            updated++;
+          } else {
+            await prisma.product.create({
+              data: { tenantId: req.user!.tenantId, name, price, sku, barcode, cost, taxable, description, imageUrl, categoryId },
+            });
+            created++;
+          }
+        } else {
+          await prisma.product.create({
+            data: { tenantId: req.user!.tenantId, name, price, barcode, cost, taxable, description, imageUrl, categoryId },
+          });
+          created++;
+        }
+      } catch (err) {
+        errors.push({ row: rowNum, error: err instanceof Error ? err.message : 'Unknown error' });
+      }
+    }
+
+    res.json({ success: true, data: { created, updated, imported: created + updated, errors } });
+  } catch (err) {
+    next(err);
+  }
+});

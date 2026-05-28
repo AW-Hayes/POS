@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { formatCurrency } from '@/lib/utils';
-import { Search, Package, Plus, Pencil, Archive, Printer, Trash2 } from 'lucide-react';
+import { Search, Package, Plus, Pencil, Archive, Printer, Trash2, Upload, Download } from 'lucide-react';
 import type { Product, PriceBreak } from '@pos/types';
 
 interface Category { id: string; name: string }
@@ -86,6 +86,16 @@ export function ProductsPage() {
     onSuccess: (_, id) => setBreaks((prev) => prev.filter((b) => b.id !== id)),
   });
 
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
+  const [csvResult, setCsvResult] = useState<{ imported: number; created: number; updated: number; errors: { row: number; error: string }[] } | null>(null);
+  const importMutation = useMutation({
+    mutationFn: (csv: string) => api.post('/products/import-csv', { csv }).then((r) => r.data.data),
+    onSuccess: (result) => {
+      setCsvResult(result);
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
+
   useEffect(() => {
     if (editing) {
       api.get(`/price-breaks/products/${editing.id}`).then((r) => setBreaks(r.data.data));
@@ -145,10 +155,16 @@ export function ProductsPage() {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Products</h1>
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Product
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => { setCsvResult(null); setCsvImportOpen(true); }}>
+            <Upload className="h-4 w-4 mr-2" />
+            Import CSV
+          </Button>
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Product
+          </Button>
+        </div>
       </div>
 
       <div className="relative max-w-sm">
@@ -440,6 +456,91 @@ export function ProductsPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── CSV Import dialog ──────────────────────────────────────────────── */}
+      <Dialog open={csvImportOpen} onOpenChange={(o) => { setCsvImportOpen(o); if (!o) setCsvResult(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Import Products from CSV</DialogTitle>
+          </DialogHeader>
+
+          {!csvResult ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Upload a CSV with columns: <code className="text-xs bg-muted px-1 rounded">name</code>, <code className="text-xs bg-muted px-1 rounded">price</code> (required) and optionally <code className="text-xs bg-muted px-1 rounded">sku</code>, <code className="text-xs bg-muted px-1 rounded">barcode</code>, <code className="text-xs bg-muted px-1 rounded">cost</code>, <code className="text-xs bg-muted px-1 rounded">category</code>, <code className="text-xs bg-muted px-1 rounded">taxable</code>, <code className="text-xs bg-muted px-1 rounded">imageUrl</code>.
+                Products are upserted by SKU when provided.
+              </p>
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    const template = 'name,sku,barcode,price,cost,category,taxable,description,imageUrl\nSample Widget,SKU001,123456789,9.99,4.50,General,true,A sample product,\n';
+                    const blob = new Blob([template], { type: 'text/csv' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = 'products-template.csv'; a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download Template
+                </Button>
+              </div>
+
+              <label className="block">
+                <div className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary transition-colors">
+                  <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">Click to select a CSV file</p>
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="sr-only"
+                    disabled={importMutation.isPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        const csv = ev.target?.result as string;
+                        if (csv) importMutation.mutate(csv);
+                      };
+                      reader.readAsText(file);
+                    }}
+                  />
+                </div>
+              </label>
+
+              {importMutation.isPending && (
+                <p className="text-sm text-center text-muted-foreground">Importing…</p>
+              )}
+              {importMutation.isError && (
+                <p className="text-sm text-destructive">
+                  {importMutation.error instanceof Error ? importMutation.error.message : 'Import failed'}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-muted/40 p-4 grid grid-cols-3 gap-4 text-center">
+                <div><p className="text-2xl font-bold text-green-600">{csvResult.created}</p><p className="text-xs text-muted-foreground">Created</p></div>
+                <div><p className="text-2xl font-bold text-blue-600">{csvResult.updated}</p><p className="text-xs text-muted-foreground">Updated</p></div>
+                <div><p className="text-2xl font-bold text-destructive">{csvResult.errors.length}</p><p className="text-xs text-muted-foreground">Errors</p></div>
+              </div>
+              {csvResult.errors.length > 0 && (
+                <div className="max-h-40 overflow-y-auto space-y-1">
+                  {csvResult.errors.map((e, i) => (
+                    <p key={i} className="text-xs text-destructive">Row {e.row}: {e.error}</p>
+                  ))}
+                </div>
+              )}
+              <Button className="w-full" onClick={() => setCsvImportOpen(false)}>Done</Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

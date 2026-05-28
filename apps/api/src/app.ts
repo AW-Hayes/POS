@@ -38,6 +38,7 @@ import { serviceTicketsRouter } from './routes/service-tickets';
 import { bundlesRouter } from './routes/bundles';
 import { commissionsRouter } from './routes/commissions';
 import { auditRouter } from './routes/audit';
+import { paymentsRouter } from './routes/payments';
 import { errorHandler } from './middleware/errorHandler';
 import { registerBuiltinHooks } from './hooks';
 
@@ -96,5 +97,6 @@ app.use('/api/service-tickets', serviceTicketsRouter);
 app.use('/api/bundles', bundlesRouter);
 app.use('/api/commissions', commissionsRouter);
 app.use('/api/audit-log', auditRouter);
+app.use('/api/payments', paymentsRouter);
 
 app.use(errorHandler);
