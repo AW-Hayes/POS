@@ -13,20 +13,32 @@ import { formatCurrency } from '@/lib/utils';
 import { Search, Package, Plus, Pencil, Archive, Printer, Trash2, Upload, Download, DollarSign } from 'lucide-react';
 import type { Product, PriceBreak } from '@pos/types';
 
-interface Category { id: string; name: string }
+interface Category { id: string; name: string; productTypeId?: string }
+interface ProductType { id: string; name: string }
+interface ProductClass { id: string; name: string; categoryId: string }
+interface Fineline { id: string; name: string; classId: string }
 
 interface ProductFormData {
   name: string;
   sku: string;
+  upc: string;
+  barcode: string;
+  shortCode: string;
   price: string;
   cost: string;
+  productTypeId: string;
   categoryId: string;
+  classId: string;
+  finelineId: string;
   taxable: boolean;
   trackInventory: boolean;
 }
 
 const EMPTY_FORM: ProductFormData = {
-  name: '', sku: '', price: '', cost: '', categoryId: '', taxable: true, trackInventory: true,
+  name: '', sku: '', upc: '', barcode: '', shortCode: '',
+  price: '', cost: '',
+  productTypeId: '', categoryId: '', classId: '', finelineId: '',
+  taxable: true, trackInventory: true,
 };
 
 export function ProductsPage() {
@@ -50,8 +62,28 @@ export function ProductsPage() {
     queryFn: () => api.get('/categories').then((r) => r.data.data as Category[]),
   });
 
+  const { data: productTypesData } = useQuery({
+    queryKey: ['product-types'],
+    queryFn: () => api.get('/product-types').then((r) => r.data.data as ProductType[]),
+  });
+
+  const { data: classesData } = useQuery({
+    queryKey: ['product-classes', form.categoryId],
+    queryFn: () => api.get('/product-classes', { params: { categoryId: form.categoryId } }).then((r) => r.data.data as ProductClass[]),
+    enabled: !!form.categoryId,
+  });
+
+  const { data: finelinesData } = useQuery({
+    queryKey: ['finelines', form.classId],
+    queryFn: () => api.get('/finelines', { params: { classId: form.classId } }).then((r) => r.data.data as Fineline[]),
+    enabled: !!form.classId,
+  });
+
   const products: Product[] = data?.data ?? [];
   const categories: Category[] = catData ?? [];
+  const productTypes: ProductType[] = productTypesData ?? [];
+  const classes: ProductClass[] = classesData ?? [];
+  const finelines: Fineline[] = finelinesData ?? [];
 
   const saveMutation = useMutation({
     mutationFn: (payload: object) =>
@@ -127,9 +159,15 @@ export function ProductsPage() {
     setForm({
       name: product.name,
       sku: product.sku ?? '',
+      upc: product.upc ?? '',
+      barcode: product.barcode ?? '',
+      shortCode: product.shortCode ?? '',
       price: String(product.price),
       cost: product.cost != null ? String(product.cost) : '',
-      categoryId: product.category?.id ?? '',
+      productTypeId: product.productTypeId ?? '',
+      categoryId: product.categoryId ?? '',
+      classId: product.classId ?? '',
+      finelineId: product.finelineId ?? '',
       taxable: product.taxable,
       trackInventory: product.trackInventory,
     });
@@ -153,9 +191,15 @@ export function ProductsPage() {
     saveMutation.mutate({
       name: form.name.trim(),
       sku: form.sku.trim() || undefined,
+      upc: form.upc.trim() || undefined,
+      barcode: form.barcode.trim() || undefined,
+      shortCode: form.shortCode.trim() || undefined,
       price,
       cost: form.cost ? parseFloat(form.cost) : undefined,
+      productTypeId: form.productTypeId || undefined,
       categoryId: form.categoryId || undefined,
+      classId: form.classId || undefined,
+      finelineId: form.finelineId || undefined,
       taxable: form.taxable,
       trackInventory: form.trackInventory,
     });
@@ -301,69 +345,88 @@ export function ProductsPage() {
           <DialogHeader>
             <DialogTitle>{editing ? 'Edit Product' : 'Add Product'}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
             <div className="space-y-1.5">
               <Label htmlFor="p-name">Name *</Label>
-              <Input
-                id="p-name"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="e.g. T-Shirt"
-                autoFocus
-              />
+              <Input id="p-name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. 2x4 Stud" autoFocus />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="p-price">Price *</Label>
-                <Input
-                  id="p-price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.price}
-                  onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
-                  placeholder="0.00"
-                />
+                <Input id="p-price" type="number" min="0" step="0.01" value={form.price} onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))} placeholder="0.00" />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="p-cost">Cost</Label>
-                <Input
-                  id="p-cost"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.cost}
-                  onChange={(e) => setForm((f) => ({ ...f, cost: e.target.value }))}
-                  placeholder="0.00"
-                />
+                <Input id="p-cost" type="number" min="0" step="0.01" value={form.cost} onChange={(e) => setForm((f) => ({ ...f, cost: e.target.value }))} placeholder="0.00" />
+              </div>
+            </div>
+
+            {/* Identifiers */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="p-sku">SKU</Label>
+                <Input id="p-sku" value={form.sku} onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))} placeholder="AUTO" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="p-upc">UPC</Label>
+                <Input id="p-upc" value={form.upc} onChange={(e) => setForm((f) => ({ ...f, upc: e.target.value }))} placeholder="12-digit barcode" />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="p-sku">SKU</Label>
-                <Input
-                  id="p-sku"
-                  value={form.sku}
-                  onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))}
-                  placeholder="AUTO"
-                />
+                <Label htmlFor="p-barcode">Barcode</Label>
+                <Input id="p-barcode" value={form.barcode} onChange={(e) => setForm((f) => ({ ...f, barcode: e.target.value }))} placeholder="Scanner barcode" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="p-shortcode">Short Code</Label>
+                <Input id="p-shortcode" value={form.shortCode} onChange={(e) => setForm((f) => ({ ...f, shortCode: e.target.value }))} placeholder="e.g. 2X4, PLYWOOD" />
+              </div>
+            </div>
+
+            {/* 4-level hierarchy */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Product Type</Label>
+                <Select value={form.productTypeId || '__none__'} onValueChange={(v) => setForm((f) => ({ ...f, productTypeId: v === '__none__' ? '' : v }))}>
+                  <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
+                    {productTypes.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1.5">
                 <Label>Category</Label>
-                <Select
-                  value={form.categoryId || '__none__'}
-                  onValueChange={(v) => setForm((f) => ({ ...f, categoryId: v === '__none__' ? '' : v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="None" />
-                  </SelectTrigger>
+                <Select value={form.categoryId || '__none__'} onValueChange={(v) => setForm((f) => ({ ...f, categoryId: v === '__none__' ? '' : v, classId: '', finelineId: '' }))}>
+                  <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">None</SelectItem>
-                    {categories.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                    ))}
+                    {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Class</Label>
+                <Select value={form.classId || '__none__'} onValueChange={(v) => setForm((f) => ({ ...f, classId: v === '__none__' ? '' : v, finelineId: '' }))} disabled={!form.categoryId}>
+                  <SelectTrigger><SelectValue placeholder={form.categoryId ? 'None' : 'Select category first'} /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
+                    {classes.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Fineline</Label>
+                <Select value={form.finelineId || '__none__'} onValueChange={(v) => setForm((f) => ({ ...f, finelineId: v === '__none__' ? '' : v }))} disabled={!form.classId}>
+                  <SelectTrigger><SelectValue placeholder={form.classId ? 'None' : 'Select class first'} /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
+                    {finelines.map((f) => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

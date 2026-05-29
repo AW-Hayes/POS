@@ -394,14 +394,29 @@ export function TerminalPage() {
   });
 
   // Barcode scanner: detect rapid keystrokes from HID scanner (fires keydown globally)
-  const handleBarcodeInput = useCallback(async (barcode: string) => {
-    if (!barcode.trim()) return;
-    const res = await api.get('/products', { params: { barcode: barcode.trim() } });
-    const matches: Product[] = res.data.data ?? [];
-    if (matches.length === 1) {
-      const product = matches[0];
-      if (product.variants.length > 0) setVariantProduct(product);
-      else addToCart(product);
+  // Tries barcode → UPC → shortCode → SKU in order, adds to cart on first unique match.
+  const handleBarcodeInput = useCallback(async (raw: string) => {
+    const val = raw.trim();
+    if (!val) return;
+
+    // Try each lookup field in turn until we get exactly one match
+    const lookupFields = [
+      { barcode: val },
+      { upc: val },
+      { shortCode: val },
+      { sku: val },
+    ];
+
+    for (const params of lookupFields) {
+      const res = await api.get('/products', { params });
+      const matches: Product[] = res.data.data ?? [];
+      if (matches.length === 1) {
+        const product = matches[0];
+        if (product.variants.length > 0) setVariantProduct(product);
+        else addToCart(product);
+        return;
+      }
+      if (matches.length > 1) return; // ambiguous — do nothing
     }
   }, [addToCart]);
 

@@ -10,11 +10,16 @@ export const productsRouter = Router();
 productsRouter.use(authenticate);
 
 const productSchema = z.object({
+  productTypeId: z.string().optional(),
   categoryId: z.string().optional(),
+  classId: z.string().optional(),
+  finelineId: z.string().optional(),
   name: z.string().min(1),
   description: z.string().optional(),
   sku: z.string().optional(),
+  upc: z.string().optional(),
   barcode: z.string().optional(),
+  shortCode: z.string().optional(),
   price: z.number().min(0),
   cost: z.number().min(0).optional(),
   taxable: z.boolean().default(true),
@@ -26,7 +31,10 @@ const productSchema = z.object({
 });
 
 const productInclude = {
+  productType: { select: { id: true, name: true } },
   category: { select: { id: true, name: true, color: true } },
+  class: { select: { id: true, name: true } },
+  fineline: { select: { id: true, name: true } },
   attributes: { include: { attribute: true } },
   variants: {
     where: { active: true },
@@ -40,6 +48,9 @@ productsRouter.get('/', async (req, res, next) => {
   try {
     const q = qs(req.query.q);
     const categoryId = qs(req.query.categoryId);
+    const productTypeId = qs(req.query.productTypeId);
+    const classId = qs(req.query.classId);
+    const finelineId = qs(req.query.finelineId);
     const activeParam = qs(req.query.active) ?? 'true';
     const page = Number(qs(req.query.page) ?? '1');
     const pageSize = Math.min(Number(qs(req.query.pageSize) ?? '50'), 200);
@@ -47,14 +58,24 @@ productsRouter.get('/', async (req, res, next) => {
 
     const sku = qs(req.query.sku);
     const barcode = qs(req.query.barcode);
+    const upc = qs(req.query.upc);
+    const shortCode = qs(req.query.shortCode);
+
+    // Exact-match lookups take priority; fall back to name search
+    const exactLookup = sku || barcode || upc || shortCode;
 
     const where = {
       tenantId: req.user!.tenantId,
       active: activeParam === 'true',
       ...(categoryId ? { categoryId } : {}),
+      ...(productTypeId ? { productTypeId } : {}),
+      ...(classId ? { classId } : {}),
+      ...(finelineId ? { finelineId } : {}),
       ...(sku ? { sku } : {}),
       ...(barcode ? { barcode } : {}),
-      ...(q && !sku && !barcode ? { name: { contains: q, mode: 'insensitive' as const } } : {}),
+      ...(upc ? { upc } : {}),
+      ...(shortCode ? { shortCode } : {}),
+      ...(q && !exactLookup ? { name: { contains: q, mode: 'insensitive' as const } } : {}),
     };
 
     const [products, total] = await Promise.all([
@@ -100,31 +121,37 @@ productsRouter.get('/lookup', async (req, res, next) => {
   try {
     const barcode = qs(req.query.barcode);
     const sku = qs(req.query.sku);
-    if (!barcode && !sku) throw new AppError(400, 'Provide barcode or sku');
+    const upc = qs(req.query.upc);
+    const shortCode = qs(req.query.shortCode);
+    if (!barcode && !sku && !upc && !shortCode) {
+      throw new AppError(400, 'Provide barcode, sku, upc, or shortCode');
+    }
+
+    // Try each lookup field in order: barcode → UPC → SKU → shortCode
+    const lookupWhere = barcode ? { barcode }
+      : upc ? { upc }
+      : sku ? { sku }
+      : { shortCode: shortCode! };
 
     const product = await prisma.product.findFirst({
-      where: {
-        tenantId: req.user!.tenantId,
-        active: true,
-        ...(barcode ? { barcode } : {}),
-        ...(sku ? { sku } : {}),
-      },
+      where: { tenantId: req.user!.tenantId, active: true, ...lookupWhere },
       include: productInclude,
     });
 
     if (!product) {
-      const variant = await prisma.productVariant.findFirst({
-        where: {
-          active: true,
-          product: { tenantId: req.user!.tenantId, active: true },
-          ...(barcode ? { barcode } : {}),
-          ...(sku ? { sku } : {}),
-        },
-        include: { product: { include: productInclude } },
-      });
-      if (!variant) throw new AppError(404, 'Product not found');
-      res.json({ success: true, data: variant.product, variantId: variant.id });
-      return;
+      // Fall back to variant barcode/sku lookup (variants don't have upc/shortCode)
+      const variantWhere = barcode ? { barcode } : sku ? { sku } : null;
+      if (variantWhere) {
+        const variant = await prisma.productVariant.findFirst({
+          where: { active: true, product: { tenantId: req.user!.tenantId, active: true }, ...variantWhere },
+          include: { product: { include: productInclude } },
+        });
+        if (variant) {
+          res.json({ success: true, data: variant.product, variantId: variant.id });
+          return;
+        }
+      }
+      throw new AppError(404, 'Product not found');
     }
 
     res.json({ success: true, data: product });

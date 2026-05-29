@@ -20,6 +20,7 @@ model Tenant {
   locations            Location[]
   users                User[]
   products             Product[]
+  productTypes         ProductType[]
   categories           Category[]
   customers            Customer[]
   attributeDefinitions AttributeDefinition[]
@@ -114,21 +115,76 @@ model User {
 
 // ─── Products ─────────────────────────────────────────────────────────────────
 
-model Category {
+model ProductType {
   id        String   @id @default(cuid())
   tenantId  String
   name      String
-  parentId  String?
   sortOrder Int      @default(0)
-  color     String?
-  icon      String?
+  active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant   Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
-  children Category[] @relation("CategoryTree")
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categories Category[]
+  products   Product[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model Category {
+  id            String   @id @default(cuid())
+  tenantId      String
+  productTypeId String?
+  name          String
+  parentId      String?
+  sortOrder     Int      @default(0)
+  color         String?
+  icon          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productType ProductType?  @relation(fields: [productTypeId], references: [id])
+  parent      Category?     @relation("CategoryTree", fields: [parentId], references: [id])
+  children    Category[]    @relation("CategoryTree")
+  products    Product[]
+  classes     ProductClass[]
+}
+
+model ProductClass {
+  id         String   @id @default(cuid())
+  tenantId   String
+  categoryId String
+  name       String
+  sortOrder  Int      @default(0)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  category  Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  finelines Fineline[]
+  products  Product[]
+
+  @@unique([categoryId, name])
+  @@index([tenantId])
+}
+
+model Fineline {
+  id       String   @id @default(cuid())
+  tenantId String
+  classId  String
+  name     String
+  sortOrder Int     @default(0)
+  active   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  class    ProductClass @relation(fields: [classId], references: [id], onDelete: Cascade)
   products Product[]
+
+  @@unique([classId, name])
+  @@index([tenantId])
 }
 
 model AttributeDefinition {
@@ -146,15 +202,20 @@ model AttributeDefinition {
 }
 
 model Product {
-  id             String   @id @default(cuid())
-  tenantId       String
-  categoryId     String?
-  name           String
-  description    String?
-  sku            String?
-  barcode        String?
-  price          Float
-  cost           Float?
+  id                      String   @id @default(cuid())
+  tenantId                String
+  productTypeId           String?
+  categoryId              String?
+  classId                 String?
+  finelineId              String?
+  name                    String
+  description             String?
+  sku                     String?
+  upc                     String?
+  barcode                 String?
+  shortCode               String?
+  price                   Float
+  cost                    Float?
   taxable                 Boolean  @default(true)
   trackInventory          Boolean  @default(true)
   active                  Boolean  @default(true)
@@ -167,7 +228,10 @@ model Product {
   updatedAt               DateTime @updatedAt
 
   tenant             Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productType        ProductType?         @relation(fields: [productTypeId], references: [id])
   category           Category?            @relation(fields: [categoryId], references: [id])
+  class              ProductClass?        @relation(fields: [classId], references: [id])
+  fineline           Fineline?            @relation(fields: [finelineId], references: [id])
   attributes         ProductAttribute[]
   variants           ProductVariant[]
   inventory          InventoryItem[]
@@ -181,6 +245,8 @@ model Product {
 
   @@unique([tenantId, sku])
   @@unique([tenantId, barcode])
+  @@unique([tenantId, upc])
+  @@unique([tenantId, shortCode])
 }
 
 model ProductAttribute {
