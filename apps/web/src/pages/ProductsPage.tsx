@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { formatCurrency } from '@/lib/utils';
-import { Search, Package, Plus, Pencil, Archive, Printer, Trash2, Upload, Download } from 'lucide-react';
+import { Search, Package, Plus, Pencil, Archive, Printer, Trash2, Upload, Download, DollarSign } from 'lucide-react';
 import type { Product, PriceBreak } from '@pos/types';
 
 interface Category { id: string; name: string }
@@ -88,10 +88,20 @@ export function ProductsPage() {
 
   const [csvImportOpen, setCsvImportOpen] = useState(false);
   const [csvResult, setCsvResult] = useState<{ imported: number; created: number; updated: number; errors: { row: number; error: string }[] } | null>(null);
+  const [priceUpdateOpen, setPriceUpdateOpen] = useState(false);
+  const [priceUpdateResult, setPriceUpdateResult] = useState<{ updated: number; errors: { row: number; error: string }[] } | null>(null);
   const importMutation = useMutation({
     mutationFn: (csv: string) => api.post('/products/import-csv', { csv }).then((r) => r.data.data),
     onSuccess: (result) => {
       setCsvResult(result);
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
+
+  const priceUpdateMutation = useMutation({
+    mutationFn: (csv: string) => api.post('/products/bulk-price-update', { csv }).then((r) => r.data.data),
+    onSuccess: (result) => {
+      setPriceUpdateResult(result);
       queryClient.invalidateQueries({ queryKey: ['products'] });
     },
   });
@@ -156,6 +166,10 @@ export function ProductsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Products</h1>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => { setPriceUpdateResult(null); setPriceUpdateOpen(true); }}>
+            <DollarSign className="h-4 w-4 mr-2" />
+            Update Prices
+          </Button>
           <Button variant="outline" size="sm" onClick={() => { setCsvResult(null); setCsvImportOpen(true); }}>
             <Upload className="h-4 w-4 mr-2" />
             Import CSV
@@ -539,6 +553,81 @@ export function ProductsPage() {
                 </div>
               )}
               <Button className="w-full" onClick={() => setCsvImportOpen(false)}>Done</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Bulk Price Update dialog ───────────────────────────────────────── */}
+      <Dialog open={priceUpdateOpen} onOpenChange={(o) => { setPriceUpdateOpen(o); if (!o) setPriceUpdateResult(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Bulk Price Update</DialogTitle>
+          </DialogHeader>
+
+          {!priceUpdateResult ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Upload a CSV to update prices and/or costs for existing products. Columns: <code className="text-xs bg-muted px-1 rounded">sku</code> or <code className="text-xs bg-muted px-1 rounded">barcode</code> (required) + <code className="text-xs bg-muted px-1 rounded">price</code> and/or <code className="text-xs bg-muted px-1 rounded">cost</code>.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => {
+                  const template = 'sku,barcode,price,cost\nSKU001,,9.99,4.50\n,123456789,14.99,7.00\n';
+                  const blob = new Blob([template], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a'); a.href = url; a.download = 'price-update-template.csv'; a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Download Template
+              </Button>
+              <label className="block">
+                <div className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary transition-colors">
+                  <DollarSign className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">Click to select a CSV file</p>
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="sr-only"
+                    disabled={priceUpdateMutation.isPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        const csv = ev.target?.result as string;
+                        if (csv) priceUpdateMutation.mutate(csv);
+                      };
+                      reader.readAsText(file);
+                    }}
+                  />
+                </div>
+              </label>
+              {priceUpdateMutation.isPending && <p className="text-sm text-center text-muted-foreground">Updating…</p>}
+              {priceUpdateMutation.isError && (
+                <p className="text-sm text-destructive">
+                  {priceUpdateMutation.error instanceof Error ? priceUpdateMutation.error.message : 'Update failed'}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-muted/40 p-4 grid grid-cols-2 gap-4 text-center">
+                <div><p className="text-2xl font-bold text-blue-600">{priceUpdateResult.updated}</p><p className="text-xs text-muted-foreground">Updated</p></div>
+                <div><p className="text-2xl font-bold text-destructive">{priceUpdateResult.errors.length}</p><p className="text-xs text-muted-foreground">Errors</p></div>
+              </div>
+              {priceUpdateResult.errors.length > 0 && (
+                <div className="max-h-40 overflow-y-auto space-y-1">
+                  {priceUpdateResult.errors.map((e, i) => (
+                    <p key={i} className="text-xs text-destructive">Row {e.row}: {e.error}</p>
+                  ))}
+                </div>
+              )}
+              <Button className="w-full" onClick={() => setPriceUpdateOpen(false)}>Done</Button>
             </div>
           )}
         </DialogContent>

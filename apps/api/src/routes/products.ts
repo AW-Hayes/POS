@@ -369,3 +369,63 @@ productsRouter.post('/import-csv', requireRole('admin', 'manager'), async (req, 
     next(err);
   }
 });
+
+// ─── Bulk price update (CSV: sku,price,cost) ──────────────────────────────────
+
+productsRouter.post('/bulk-price-update', requireRole('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { csv } = z.object({ csv: z.string().min(1) }).parse(req.body);
+
+    let rows: Record<string, string>[];
+    try {
+      rows = parseCsv(csv, { columns: true, skip_empty_lines: true, trim: true }) as Record<string, string>[];
+    } catch {
+      throw new AppError(400, 'Invalid CSV format');
+    }
+
+    let updated = 0;
+    const errors: Array<{ row: number; error: string }> = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 2;
+
+      try {
+        const sku = row['sku']?.trim();
+        const barcode = row['barcode']?.trim();
+        if (!sku && !barcode) { errors.push({ row: rowNum, error: 'sku or barcode required' }); continue; }
+
+        const priceRaw = row['price']?.trim();
+        const costRaw = row['cost']?.trim();
+        if (!priceRaw && !costRaw) { errors.push({ row: rowNum, error: 'at least price or cost required' }); continue; }
+
+        const price = priceRaw ? parseFloat(priceRaw) : undefined;
+        const cost = costRaw ? parseFloat(costRaw) : undefined;
+        if (price !== undefined && (isNaN(price) || price < 0)) { errors.push({ row: rowNum, error: 'invalid price' }); continue; }
+        if (cost !== undefined && (isNaN(cost) || cost < 0)) { errors.push({ row: rowNum, error: 'invalid cost' }); continue; }
+
+        const where = sku
+          ? { tenantId: req.user!.tenantId, sku }
+          : { tenantId: req.user!.tenantId, barcode: barcode! };
+
+        const existing = await prisma.product.findFirst({ where });
+        if (!existing) { errors.push({ row: rowNum, error: `Product not found (${sku ? `sku: ${sku}` : `barcode: ${barcode}`})` }); continue; }
+
+        await prisma.product.update({
+          where: { id: existing.id },
+          data: {
+            ...(price !== undefined ? { price } : {}),
+            ...(cost !== undefined ? { cost } : {}),
+          },
+        });
+        updated++;
+      } catch (err) {
+        errors.push({ row: rowNum, error: err instanceof Error ? err.message : 'Unknown error' });
+      }
+    }
+
+    res.json({ success: true, data: { updated, errors } });
+  } catch (err) {
+    next(err);
+  }
+});

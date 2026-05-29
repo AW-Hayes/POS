@@ -253,3 +253,85 @@ purchaseOrdersRouter.post('/:id/cancel', async (req, res, next) => {
     next(err);
   }
 });
+
+// ─── Print / PDF ───────────────────────────────────────────────────────────────
+
+purchaseOrdersRouter.get('/:id/print', async (req, res, next) => {
+  try {
+    const po = await prisma.purchaseOrder.findFirst({
+      where: { id: req.params.id, tenantId: req.user!.tenantId },
+      include: poInclude,
+    });
+    if (!po) throw new AppError(404, 'Purchase order not found');
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.user!.tenantId } });
+
+    const statusColors: Record<string, string> = {
+      draft: '#6b7280', ordered: '#d97706', partial: '#d97706', received: '#16a34a', cancelled: '#dc2626',
+    };
+
+    const rows = po.items.map(item => `
+      <tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb">${item.product?.name ?? '—'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;color:#6b7280">${item.product?.sku ?? item.variant?.sku ?? '—'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${item.orderedQty}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${item.receivedQty}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right">$${item.unitCost.toFixed(2)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:600">$${item.total.toFixed(2)}</td>
+      </tr>`).join('');
+
+    const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>PO #${po.id.slice(-8).toUpperCase()}</title>
+<style>
+  body { font-family: sans-serif; max-width: 900px; margin: 0 auto; padding: 32px; color: #111; }
+  @media print { body { padding: 0; } .no-print { display: none; } }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .meta { display: flex; gap: 40px; margin: 24px 0; }
+  .meta-group { }
+  .meta-label { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; }
+  .meta-value { font-size: 14px; font-weight: 600; margin-top: 2px; }
+  .status { display: inline-block; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; color: white; background: ${statusColors[po.status] ?? '#6b7280'}; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  thead th { padding: 8px; background: #f9fafb; text-align: left; font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; }
+  thead th:nth-child(n+3) { text-align: right; }
+  .total-row td { padding: 10px 8px; font-weight: 700; font-size: 16px; border-top: 2px solid #111; }
+  .notes { margin-top: 24px; padding: 12px; background: #f9fafb; border-radius: 6px; font-size: 13px; color: #374151; }
+</style>
+</head>
+<body>
+<button class="no-print" onclick="window.print()" style="float:right;padding:8px 16px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">Print / Save PDF</button>
+<h1>Purchase Order</h1>
+<p style="color:#6b7280;font-size:13px">PO #${po.id.slice(-8).toUpperCase()} &nbsp;·&nbsp; ${tenant?.name ?? ''}</p>
+<div class="meta">
+  <div class="meta-group"><div class="meta-label">Status</div><div class="meta-value"><span class="status">${po.status.toUpperCase()}</span></div></div>
+  <div class="meta-group"><div class="meta-label">Vendor</div><div class="meta-value">${po.vendor?.name ?? 'No vendor'}</div></div>
+  <div class="meta-group"><div class="meta-label">Created</div><div class="meta-value">${new Date(po.createdAt).toLocaleDateString()}</div></div>
+  ${po.orderedAt ? `<div class="meta-group"><div class="meta-label">Ordered</div><div class="meta-value">${new Date(po.orderedAt).toLocaleDateString()}</div></div>` : ''}
+  ${po.receivedAt ? `<div class="meta-group"><div class="meta-label">Received</div><div class="meta-value">${new Date(po.receivedAt).toLocaleDateString()}</div></div>` : ''}
+</div>
+<table>
+  <thead>
+    <tr>
+      <th>Product</th><th>SKU</th><th style="text-align:right">Ordered</th>
+      <th style="text-align:right">Received</th><th style="text-align:right">Unit Cost</th><th style="text-align:right">Total</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+  <tfoot>
+    <tr class="total-row">
+      <td colspan="5" style="text-align:right;padding:10px 8px;border-top:2px solid #111;font-weight:700">Order Total</td>
+      <td style="padding:10px 8px;text-align:right;border-top:2px solid #111;font-weight:700;font-size:16px">$${po.total.toFixed(2)}</td>
+    </tr>
+  </tfoot>
+</table>
+${po.notes ? `<div class="notes"><strong>Notes:</strong> ${po.notes}</div>` : ''}
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (err) {
+    next(err);
+  }
+});

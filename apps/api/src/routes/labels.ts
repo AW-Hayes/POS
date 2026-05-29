@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import bwipjs from 'bwip-js';
 import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
@@ -7,14 +8,35 @@ import { AppError } from '../middleware/errorHandler';
 export const labelsRouter = Router();
 labelsRouter.use(authenticate);
 
-function labelHtml(items: Array<{ name: string; sku?: string | null; barcode?: string | null; price: number }>) {
-  const labels = items.map(item => `
+async function barcodeDataUrl(value: string): Promise<string> {
+  try {
+    const png = await bwipjs.toBuffer({
+      bcid: 'code128',
+      text: value,
+      scale: 2,
+      height: 8,
+      includetext: false,
+      paddingwidth: 2,
+    });
+    return `data:image/png;base64,${png.toString('base64')}`;
+  } catch {
+    return '';
+  }
+}
+
+async function labelHtml(items: Array<{ name: string; sku?: string | null; barcode?: string | null; price: number }>) {
+  const labelBlocks = await Promise.all(items.map(async item => {
+    const barcodeValue = item.barcode || item.sku;
+    const barcodeImg = barcodeValue ? await barcodeDataUrl(barcodeValue) : '';
+    return `
     <div class="label">
       <div class="name">${item.name}</div>
       ${item.sku ? `<div class="sku">SKU: ${item.sku}</div>` : ''}
-      ${item.barcode ? `<div class="barcode">${item.barcode}</div>` : ''}
+      ${barcodeImg ? `<img class="barcode-img" src="${barcodeImg}" alt="${barcodeValue}" />` : ''}
+      ${barcodeValue && !barcodeImg ? `<div class="barcode-text">${barcodeValue}</div>` : ''}
       <div class="price">$${item.price.toFixed(2)}</div>
-    </div>`).join('');
+    </div>`;
+  }));
 
   return `<!DOCTYPE html>
 <html>
@@ -32,16 +54,18 @@ function labelHtml(items: Array<{ name: string; sku?: string | null; barcode?: s
     page-break-inside: avoid;
     box-sizing: border-box;
     vertical-align: top;
+    overflow: hidden;
   }
   .name { font-weight: bold; font-size: 11px; line-height: 1.2; max-height: 2.4em; overflow: hidden; }
-  .sku { font-size: 9px; color: #666; margin-top: 2px; }
-  .barcode { font-family: monospace; font-size: 10px; margin-top: 2px; letter-spacing: 1px; }
-  .price { font-size: 14px; font-weight: bold; margin-top: 4px; }
+  .sku { font-size: 9px; color: #666; margin-top: 1px; }
+  .barcode-img { display: block; max-width: 100%; height: 28px; margin-top: 2px; }
+  .barcode-text { font-family: monospace; font-size: 9px; margin-top: 2px; letter-spacing: 1px; }
+  .price { font-size: 14px; font-weight: bold; margin-top: 2px; }
   @media print { body { padding: 0; } }
 </style>
 </head>
 <body>
-${labels}
+${labelBlocks.join('')}
 <script>window.onload = () => window.print();</script>
 </body>
 </html>`;
@@ -62,7 +86,7 @@ labelsRouter.post('/products', async (req, res, next) => {
     const items = products.flatMap(p => Array(copies).fill({ name: p.name, sku: p.sku, barcode: p.barcode, price: p.price }));
 
     res.setHeader('Content-Type', 'text/html');
-    res.send(labelHtml(items));
+    res.send(await labelHtml(items));
   } catch (err) {
     next(err);
   }
@@ -91,7 +115,7 @@ labelsRouter.get('/purchase-orders/:poId', async (req, res, next) => {
     );
 
     res.setHeader('Content-Type', 'text/html');
-    res.send(labelHtml(items));
+    res.send(await labelHtml(items));
   } catch (err) {
     next(err);
   }
@@ -114,7 +138,7 @@ labelsRouter.get('/products', async (req, res, next) => {
     const items = products.flatMap(p => Array(copies).fill({ name: p.name, sku: p.sku, barcode: p.barcode, price: p.price }));
 
     res.setHeader('Content-Type', 'text/html');
-    res.send(labelHtml(items));
+    res.send(await labelHtml(items));
   } catch (err) {
     next(err);
   }

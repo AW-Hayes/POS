@@ -344,6 +344,14 @@ export function PurchaseOrdersPage() {
                     {['ordered', 'partial'].includes(po.status) && (
                       <Button size="sm" variant="ghost" onClick={() => openReceive(po)}>Receive</Button>
                     )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => window.open(`/api/purchase-orders/${po.id}/print`, '_blank')}
+                      title="Print / Export PDF"
+                    >
+                      Print
+                    </Button>
                     {['draft', 'ordered'].includes(po.status) && (
                       <Button
                         size="sm"
