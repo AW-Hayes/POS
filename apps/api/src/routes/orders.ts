@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
 import { authenticate, requireRole } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
@@ -58,7 +59,7 @@ const createOrderSchema = z.object({
   notes: z.string().optional(),
   promotionIds: z.array(z.string()).default([]),
   giftReceipt: z.boolean().default(false),
-  managerOverride: z.object({ userId: z.string(), pin: z.string() }).optional(),
+  managerOverrideToken: z.string().optional(),
   items: z.array(z.object({
     productId: z.string().optional(),
     variantId: z.string().optional(),
@@ -82,25 +83,30 @@ ordersRouter.post('/', async (req, res, next) => {
     const tenantSettings = tenant?.settings as Record<string, unknown>;
     const defaultTaxRate = Number(tenantSettings?.taxRate ?? 0);
 
-    // Validate manager override if any item exceeds the discount threshold
-    const discountThresholdPct = Number(tenantSettings?.discountThresholdPct ?? 100);
+    // Validate manager override if any single line's discount exceeds the threshold.
+    // Threshold of 0 / unset means "no enforcement" (matches the frontend gate).
+    const discountThresholdPct = Number(tenantSettings?.discountThresholdPct ?? 0);
     const maxItemDiscountPct = data.items.reduce((max, item) => {
       if (!item.price || item.price === 0) return max;
       return Math.max(max, (item.discount / item.price) * 100);
     }, 0);
-    if (maxItemDiscountPct > discountThresholdPct) {
-      if (!data.managerOverride) {
+    if (discountThresholdPct > 0 && maxItemDiscountPct > discountThresholdPct) {
+      if (!data.managerOverrideToken) {
         throw new AppError(403, `Discount exceeds threshold (${discountThresholdPct}%) — manager override required`);
       }
-      const manager = await prisma.user.findFirst({
-        where: { id: data.managerOverride.userId, tenantId: req.user!.tenantId, active: true },
-      });
-      if (!manager || !['admin', 'manager'].includes(manager.role)) {
-        throw new AppError(403, 'Manager override: user not found or insufficient role');
+      // Verify the short-lived JWT issued by /auth/pin-login. It carries the
+      // manager's role + tenant, so no PIN is re-handled here.
+      const secret = process.env.JWT_SECRET;
+      if (!secret) throw new AppError(500, 'JWT_SECRET not configured');
+      let payload: { tenantId?: string; role?: string };
+      try {
+        payload = jwt.verify(data.managerOverrideToken, secret) as { tenantId?: string; role?: string };
+      } catch {
+        throw new AppError(403, 'Manager override: invalid or expired authorization');
       }
-      const bcrypt = await import('bcryptjs');
-      const pinValid = manager.pin ? await bcrypt.compare(data.managerOverride.pin, manager.pin) : data.managerOverride.pin === manager.pin;
-      if (!pinValid) throw new AppError(403, 'Manager override: incorrect PIN');
+      if (payload.tenantId !== req.user!.tenantId || !['admin', 'manager'].includes(payload.role ?? '')) {
+        throw new AppError(403, 'Manager override: insufficient authorization');
+      }
     }
 
     const productIds = [...new Set(data.items.filter((i) => i.productId).map((i) => i.productId as string))];

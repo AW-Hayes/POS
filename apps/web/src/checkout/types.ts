@@ -22,6 +22,8 @@ export interface PaymentEntry {
   method: string;
   amount: number;
   reference?: string;
+  /** For cash: the amount of cash handed over (≥ amount). Used to compute change. */
+  tendered?: number;
 }
 
 export interface CheckoutState {

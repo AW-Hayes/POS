@@ -53,6 +53,9 @@ export function TerminalPage() {
   const [overridePin, setOverridePin] = useState('');
   const [overrideError, setOverrideError] = useState('');
   const [overridePending, setOverridePending] = useState(false);
+  // JWT from a successful manager PIN authorization; sent with the order so the
+  // server can verify the discount override. Cleared after each sale.
+  const [managerOverrideToken, setManagerOverrideToken] = useState<string | null>(null);
   // Register open/close
   const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
   const [openingCashInput, setOpeningCashInput] = useState('');
@@ -298,6 +301,7 @@ export function TerminalPage() {
     ch.postMessage({ type: 'complete', total: total ?? subtotal });
     ch.close();
     setCart([]);
+    setManagerOverrideToken(null);
     queryClient.invalidateQueries({ queryKey: ['orders'] });
     queryClient.invalidateQueries({ queryKey: ['inventory'] });
   }
@@ -393,30 +397,19 @@ export function TerminalPage() {
     },
   });
 
-  // Barcode scanner: detect rapid keystrokes from HID scanner (fires keydown globally)
-  // Tries barcode → UPC → shortCode → SKU in order, adds to cart on first unique match.
+  // Barcode scanner: detect rapid keystrokes from HID scanner (fires keydown globally).
+  // A single /products/lookup?code= call matches barcode, UPC, shortCode, or SKU.
   const handleBarcodeInput = useCallback(async (raw: string) => {
     const val = raw.trim();
     if (!val) return;
-
-    // Try each lookup field in turn until we get exactly one match
-    const lookupFields = [
-      { barcode: val },
-      { upc: val },
-      { shortCode: val },
-      { sku: val },
-    ];
-
-    for (const params of lookupFields) {
-      const res = await api.get('/products', { params });
-      const matches: Product[] = res.data.data ?? [];
-      if (matches.length === 1) {
-        const product = matches[0];
-        if (product.variants.length > 0) setVariantProduct(product);
-        else addToCart(product);
-        return;
-      }
-      if (matches.length > 1) return; // ambiguous — do nothing
+    try {
+      const res = await api.get('/products/lookup', { params: { code: val } });
+      const product: Product | undefined = res.data.data;
+      if (!product) return;
+      if (product.variants.length > 0) setVariantProduct(product);
+      else addToCart(product);
+    } catch {
+      // 404 / no match — nothing to add
     }
   }, [addToCart]);
 
@@ -817,10 +810,12 @@ export function TerminalPage() {
             disabled={cart.length === 0 || !locationId}
             onClick={() => {
               if (discountThresholdPct > 0) {
-                const maxDiscount = cart.reduce((s, i) => s + (i.price * i.quantity), 0);
-                const totalDiscount = cart.reduce((s, i) => s + (i.discount * i.quantity), 0);
-                const discountPct = maxDiscount > 0 ? (totalDiscount / maxDiscount) * 100 : 0;
-                if (discountPct > discountThresholdPct) {
+                // Per-item max discount % — matches the server-side override check
+                const maxItemPct = cart.reduce(
+                  (m, i) => (i.price > 0 ? Math.max(m, (i.discount / i.price) * 100) : m),
+                  0,
+                );
+                if (maxItemPct > discountThresholdPct && !managerOverrideToken) {
                   setOverridePin('');
                   setOverrideError('');
                   setOverrideOpen(true);
@@ -860,7 +855,7 @@ export function TerminalPage() {
                 variant="outline"
                 size="sm"
                 className="text-xs text-destructive hover:text-destructive"
-                onClick={() => setCart([])}
+                onClick={() => { setCart([]); setManagerOverrideToken(null); }}
               >
                 Clear
               </Button>
@@ -1053,6 +1048,7 @@ export function TerminalPage() {
                       const res = await api.post('/auth/pin-login', { registerId, pin: overridePin });
                       const role = res.data.data?.user?.role;
                       if (role === 'admin' || role === 'manager') {
+                        setManagerOverrideToken(res.data.data?.token ?? null);
                         setOverrideOpen(false);
                         setCheckoutOpen(true);
                       } else {
@@ -1081,6 +1077,7 @@ export function TerminalPage() {
                     const res = await api.post('/auth/pin-login', { registerId, pin: overridePin });
                     const role = res.data.data?.user?.role;
                     if (role === 'admin' || role === 'manager') {
+                      setManagerOverrideToken(res.data.data?.token ?? null);
                       setOverrideOpen(false);
                       setCheckoutOpen(true);
                     } else {
@@ -1106,6 +1103,7 @@ export function TerminalPage() {
         initialCart={cart}
         locationId={locationId ?? ''}
         sessionId={sessionId ?? undefined}
+        managerOverrideToken={managerOverrideToken}
         onClose={() => setCheckoutOpen(false)}
         onOrderComplete={handleOrderComplete}
       />

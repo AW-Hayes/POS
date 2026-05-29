@@ -59,8 +59,8 @@ ALTER TABLE "Product"
     ADD COLUMN "upc" TEXT,
     ADD COLUMN "shortCode" TEXT;
 
-CREATE UNIQUE INDEX "Product_tenantId_upc_key" ON "Product"("tenantId", "upc") WHERE "upc" IS NOT NULL;
-CREATE UNIQUE INDEX "Product_tenantId_shortCode_key" ON "Product"("tenantId", "shortCode") WHERE "shortCode" IS NOT NULL;
+CREATE UNIQUE INDEX "Product_tenantId_upc_key" ON "Product"("tenantId", "upc");
+CREATE UNIQUE INDEX "Product_tenantId_shortCode_key" ON "Product"("tenantId", "shortCode");
 
 -- AddForeignKey constraints
 ALTER TABLE "ProductType" ADD CONSTRAINT "ProductType_tenantId_fkey"

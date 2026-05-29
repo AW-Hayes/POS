@@ -27,6 +27,15 @@ export function errorHandler(
     return;
   }
 
+  // Prisma unique-constraint violation → friendly 409 (duck-typed to avoid importing @prisma/client)
+  const prismaErr = err as { code?: string; meta?: { target?: string[] | string } };
+  if (prismaErr.code === 'P2002') {
+    const target = prismaErr.meta?.target;
+    const fields = Array.isArray(target) ? target.filter((t) => t !== 'tenantId').join(', ') : (target ?? 'value');
+    res.status(409).json({ success: false, error: `A record with this ${fields || 'value'} already exists` });
+    return;
+  }
+
   console.error(err);
   res.status(500).json({ success: false, error: 'Internal server error' });
 }

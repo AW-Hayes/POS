@@ -16,6 +16,8 @@ interface CheckoutModalProps {
   initialCart: CartItem[];
   locationId: string;
   sessionId?: string;
+  /** JWT from a manager PIN authorization, required when a discount exceeds the threshold. */
+  managerOverrideToken?: string | null;
   onClose: () => void;
   onOrderComplete: () => void;
 }
@@ -25,6 +27,7 @@ export function CheckoutModal({
   initialCart,
   locationId,
   sessionId,
+  managerOverrideToken,
   onClose,
   onOrderComplete,
 }: CheckoutModalProps) {
@@ -79,6 +82,7 @@ export function CheckoutModal({
         notes: hooked.meta.notes as string | undefined,
         promotionIds: (hooked.meta.promotionIds as string[] | undefined) ?? [],
         giftReceipt: (hooked.meta.giftReceipt as boolean | undefined) ?? false,
+        ...(managerOverrideToken ? { managerOverrideToken } : {}),
         items: hooked.cart.map((item) => ({
           ...(item.productId ? { productId: item.productId } : {}),
           variantId: item.variantId,
@@ -116,8 +120,11 @@ export function CheckoutModal({
     onSuccess: (orderId) => {
       setState((s) => {
         const total = s.payments.reduce((sum, p) => sum + p.amount, 0);
+        // Change = cash tendered minus the cash applied to the order.
         const cashPayment = s.payments.find((p) => p.method === 'cash');
-        const change = cashPayment ? Math.max(0, cashPayment.amount - total) : undefined;
+        const change = cashPayment?.tendered != null
+          ? Math.max(0, cashPayment.tendered - cashPayment.amount)
+          : undefined;
         displayChannel.current?.postMessage({
           type: 'complete',
           total,
