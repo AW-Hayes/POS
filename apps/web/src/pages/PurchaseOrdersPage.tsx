@@ -275,6 +275,14 @@ export function PurchaseOrdersPage() {
     setReceiving(po);
   }
 
+  // Fetch the print HTML via axios (carries the auth token), then render it in a
+  // blank window. A raw window.open('/api/...') would send no auth header → 401.
+  async function printPO(id: string) {
+    const html = await api.get(`/purchase-orders/${id}/print`).then((r) => r.data as string);
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(html); win.document.close(); }
+  }
+
   const createLineTotal = lineItems.reduce((s, li) => s + li.orderedQty * li.unitCost, 0);
 
   return (
@@ -347,7 +355,7 @@ export function PurchaseOrdersPage() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => window.open(`/api/purchase-orders/${po.id}/print`, '_blank')}
+                      onClick={() => printPO(po.id)}
                       title="Print / Export PDF"
                     >
                       Print

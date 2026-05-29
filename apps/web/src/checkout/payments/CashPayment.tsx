@@ -17,7 +17,7 @@ export function CashPayment({ amountDue, onCollected, onCancel }: PaymentStepPro
 
   function handleCharge() {
     if (!canCharge) return;
-    onCollected({ method: 'cash', amount: amountDue });
+    onCollected({ method: 'cash', amount: amountDue, tendered: tenderedNum });
   }
 
   // Compute quick-tender buttons: round up to nice amounts above the total

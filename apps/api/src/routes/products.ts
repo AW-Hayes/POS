@@ -123,24 +123,31 @@ productsRouter.get('/lookup', async (req, res, next) => {
     const sku = qs(req.query.sku);
     const upc = qs(req.query.upc);
     const shortCode = qs(req.query.shortCode);
-    if (!barcode && !sku && !upc && !shortCode) {
-      throw new AppError(400, 'Provide barcode, sku, upc, or shortCode');
+    // `code` matches against ALL identifiers in one query — used by the terminal scanner.
+    const code = qs(req.query.code);
+    if (!barcode && !sku && !upc && !shortCode && !code) {
+      throw new AppError(400, 'Provide code, barcode, sku, upc, or shortCode');
     }
 
-    // Try each lookup field in order: barcode → UPC → SKU → shortCode
-    const lookupWhere = barcode ? { barcode }
+    // Build the product match. `code` ORs across every identifier; otherwise use
+    // whichever specific field was provided (priority barcode → UPC → SKU → shortCode).
+    const productWhere = code
+      ? { OR: [{ barcode: code }, { upc: code }, { sku: code }, { shortCode: code }] }
+      : barcode ? { barcode }
       : upc ? { upc }
       : sku ? { sku }
       : { shortCode: shortCode! };
 
     const product = await prisma.product.findFirst({
-      where: { tenantId: req.user!.tenantId, active: true, ...lookupWhere },
+      where: { tenantId: req.user!.tenantId, active: true, ...productWhere },
       include: productInclude,
     });
 
     if (!product) {
-      // Fall back to variant barcode/sku lookup (variants don't have upc/shortCode)
-      const variantWhere = barcode ? { barcode } : sku ? { sku } : null;
+      // Fall back to variant lookup (variants only carry barcode/sku).
+      const variantWhere = code
+        ? { OR: [{ barcode: code }, { sku: code }] }
+        : barcode ? { barcode } : sku ? { sku } : null;
       if (variantWhere) {
         const variant = await prisma.productVariant.findFirst({
           where: { active: true, product: { tenantId: req.user!.tenantId, active: true }, ...variantWhere },
