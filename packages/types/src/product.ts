@@ -1,12 +1,47 @@
+export interface ProductType {
+  id: string;
+  tenantId: string;
+  name: string;
+  sortOrder: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Category {
   id: string;
   tenantId: string;
+  productTypeId?: string;
+  productType?: { id: string; name: string };
   name: string;
   parentId?: string;
   sortOrder: number;
   color?: string;
   icon?: string;
   children?: Category[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductClass {
+  id: string;
+  tenantId: string;
+  categoryId: string;
+  name: string;
+  sortOrder: number;
+  active: boolean;
+  finelines?: Fineline[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Fineline {
+  id: string;
+  tenantId: string;
+  classId: string;
+  name: string;
+  sortOrder: number;
+  active: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -71,12 +106,20 @@ export interface SerialNumber {
 export interface Product {
   id: string;
   tenantId: string;
+  productTypeId?: string;
+  productType?: { id: string; name: string };
   categoryId?: string;
   category?: Category;
+  classId?: string;
+  class?: { id: string; name: string };
+  finelineId?: string;
+  fineline?: { id: string; name: string };
   name: string;
   description?: string;
   sku?: string;
+  upc?: string;
   barcode?: string;
+  shortCode?: string;
   price: number;
   cost?: number;
   taxable: boolean;

@@ -33,13 +33,14 @@ type Tenant = { id: string; name: string; slug: string; settings: Record<string,
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 
-type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard' | 'features' | 'hardware' | 'audit' | 'integrations';
+type Tab = 'terminal' | 'general' | 'locations' | 'registers' | 'users' | 'loyalty' | 'keyboard' | 'features' | 'hardware' | 'audit' | 'integrations' | 'catalog';
 
 const allTabs: { id: Tab; label: string; adminOnly?: boolean }[] = [
   { id: 'terminal',     label: 'Terminal' },
   { id: 'keyboard',     label: 'Keyboard' },
   { id: 'hardware',     label: 'Hardware' },
   { id: 'general',      label: 'General',      adminOnly: true },
+  { id: 'catalog',      label: 'Catalog',      adminOnly: true },
   { id: 'locations',    label: 'Locations',    adminOnly: true },
   { id: 'registers',    label: 'Registers',    adminOnly: true },
   { id: 'users',        label: 'Users',        adminOnly: true },
@@ -1975,6 +1976,222 @@ function MailchimpCard() {
   );
 }
 
+// ─── Catalog tab (Product Types, Categories, Classes, Finelines) ─────────────
+
+type CatalogSection = 'types' | 'categories' | 'classes' | 'finelines';
+
+function CatalogTab() {
+  const qc = useQueryClient();
+  const [section, setSection] = useState<CatalogSection>('types');
+  const [newName, setNewName] = useState('');
+  const [selectedTypeId, setSelectedTypeId] = useState('');
+  const [selectedCatId, setSelectedCatId] = useState('');
+  const [selectedClassId, setSelectedClassId] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const { data: typesData } = useQuery({ queryKey: ['product-types'], queryFn: () => api.get('/product-types').then(r => r.data.data) });
+  const { data: catsData } = useQuery({ queryKey: ['categories'], queryFn: () => api.get('/categories').then(r => r.data.data) });
+  const { data: classesData } = useQuery({ queryKey: ['product-classes', selectedCatId], queryFn: () => api.get('/product-classes', { params: { categoryId: selectedCatId } }).then(r => r.data.data), enabled: !!selectedCatId });
+  const { data: finelinesData } = useQuery({ queryKey: ['finelines', selectedClassId], queryFn: () => api.get('/finelines', { params: { classId: selectedClassId } }).then(r => r.data.data), enabled: !!selectedClassId });
+
+  const types: Array<{ id: string; name: string }> = typesData ?? [];
+  const cats: Array<{ id: string; name: string; productTypeId?: string }> = catsData ?? [];
+  const classes: Array<{ id: string; name: string }> = classesData ?? [];
+  const finelines: Array<{ id: string; name: string }> = finelinesData ?? [];
+
+  async function addItem() {
+    if (!newName.trim()) return;
+    setSaving(true);
+    try {
+      if (section === 'types') {
+        await api.post('/product-types', { name: newName.trim() });
+        qc.invalidateQueries({ queryKey: ['product-types'] });
+      } else if (section === 'categories') {
+        await api.post('/categories', { name: newName.trim(), productTypeId: selectedTypeId || undefined });
+        qc.invalidateQueries({ queryKey: ['categories'] });
+      } else if (section === 'classes') {
+        if (!selectedCatId) return;
+        await api.post('/product-classes', { name: newName.trim(), categoryId: selectedCatId });
+        qc.invalidateQueries({ queryKey: ['product-classes', selectedCatId] });
+      } else {
+        if (!selectedClassId) return;
+        await api.post('/finelines', { name: newName.trim(), classId: selectedClassId });
+        qc.invalidateQueries({ queryKey: ['finelines', selectedClassId] });
+      }
+      setNewName('');
+    } catch (err) { console.error(err); }
+    setSaving(false);
+  }
+
+  async function deleteItem(endpoint: string, id: string, queryKey: unknown[]) {
+    if (!confirm('Delete this item? Products assigned to it will be unlinked.')) return;
+    await api.delete(`/${endpoint}/${id}`);
+    qc.invalidateQueries({ queryKey });
+  }
+
+  const SECTIONS: Array<{ id: CatalogSection; label: string }> = [
+    { id: 'types', label: 'Product Types' },
+    { id: 'categories', label: 'Categories' },
+    { id: 'classes', label: 'Classes' },
+    { id: 'finelines', label: 'Finelines' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold">Catalog Hierarchy</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Organize products: <span className="font-medium">Product Type → Category → Class → Fineline</span>
+        </p>
+      </div>
+
+      {/* Section tabs */}
+      <div className="flex gap-1 border-b">
+        {SECTIONS.map(s => (
+          <button key={s.id} onClick={() => setSection(s.id)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${section === s.id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {section === 'types' && (
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-base">Product Types</CardTitle><CardDescription>Top-level classification (e.g. Construction, Retail)</CardDescription></CardHeader>
+          <CardContent className="space-y-3">
+            <div className="divide-y border rounded-lg overflow-hidden">
+              {types.length === 0 && <p className="p-3 text-sm text-muted-foreground">No product types yet</p>}
+              {types.map(t => (
+                <div key={t.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                  <span className="font-medium">{t.name}</span>
+                  <Button size="sm" variant="ghost" className="text-destructive h-7" onClick={() => deleteItem('product-types', t.id, ['product-types'])}>Remove</Button>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="New type name (e.g. Construction)" onKeyDown={e => e.key === 'Enter' && addItem()} className="h-8 text-sm" />
+              <Button size="sm" onClick={addItem} disabled={saving || !newName.trim()}>Add</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {section === 'categories' && (
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-base">Categories</CardTitle><CardDescription>Second level — assign to a product type optionally</CardDescription></CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Filter by Product Type</label>
+              <Select value={selectedTypeId || '__all__'} onValueChange={v => setSelectedTypeId(v === '__all__' ? '' : v)}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="All" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All</SelectItem>
+                  {types.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="divide-y border rounded-lg overflow-hidden">
+              {cats.filter(c => !selectedTypeId || c.productTypeId === selectedTypeId).length === 0 && <p className="p-3 text-sm text-muted-foreground">No categories yet</p>}
+              {cats.filter(c => !selectedTypeId || c.productTypeId === selectedTypeId).map(c => (
+                <div key={c.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                  <span className="font-medium">{c.name}</span>
+                  <Button size="sm" variant="ghost" className="text-destructive h-7" onClick={() => deleteItem('categories', c.id, ['categories'])}>Remove</Button>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="New category name" onKeyDown={e => e.key === 'Enter' && addItem()} className="h-8 text-sm flex-1" />
+              <Button size="sm" onClick={addItem} disabled={saving || !newName.trim()}>Add</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {section === 'classes' && (
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-base">Classes</CardTitle><CardDescription>Third level — belongs to a category</CardDescription></CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Category *</label>
+              <Select value={selectedCatId || '__none__'} onValueChange={v => { setSelectedCatId(v === '__none__' ? '' : v); }}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select a category" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Select a category…</SelectItem>
+                  {cats.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            {selectedCatId && (
+              <>
+                <div className="divide-y border rounded-lg overflow-hidden">
+                  {classes.length === 0 && <p className="p-3 text-sm text-muted-foreground">No classes for this category</p>}
+                  {classes.map(c => (
+                    <div key={c.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                      <span className="font-medium">{c.name}</span>
+                      <Button size="sm" variant="ghost" className="text-destructive h-7" onClick={() => deleteItem('product-classes', c.id, ['product-classes', selectedCatId])}>Remove</Button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="New class name" onKeyDown={e => e.key === 'Enter' && addItem()} className="h-8 text-sm flex-1" />
+                  <Button size="sm" onClick={addItem} disabled={saving || !newName.trim()}>Add</Button>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {section === 'finelines' && (
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-base">Finelines</CardTitle><CardDescription>Fourth level — belongs to a class</CardDescription></CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Category *</label>
+                <Select value={selectedCatId || '__none__'} onValueChange={v => { setSelectedCatId(v === '__none__' ? '' : v); setSelectedClassId(''); }}>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select category" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Select…</SelectItem>
+                    {cats.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Class *</label>
+                <Select value={selectedClassId || '__none__'} onValueChange={v => setSelectedClassId(v === '__none__' ? '' : v)} disabled={!selectedCatId}>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue placeholder={selectedCatId ? 'Select class' : 'Select category first'} /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Select…</SelectItem>
+                    {classes.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {selectedClassId && (
+              <>
+                <div className="divide-y border rounded-lg overflow-hidden">
+                  {finelines.length === 0 && <p className="p-3 text-sm text-muted-foreground">No finelines for this class</p>}
+                  {finelines.map(f => (
+                    <div key={f.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                      <span className="font-medium">{f.name}</span>
+                      <Button size="sm" variant="ghost" className="text-destructive h-7" onClick={() => deleteItem('finelines', f.id, ['finelines', selectedClassId])}>Remove</Button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="New fineline name" onKeyDown={e => e.key === 'Enter' && addItem()} className="h-8 text-sm flex-1" />
+                  <Button size="sm" onClick={addItem} disabled={saving || !newName.trim()}>Add</Button>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ─── Audit Log tab ────────────────────────────────────────────────────────────
 
 function AuditLogTab() {
@@ -2091,6 +2308,7 @@ export function SettingsPage() {
       {tab === 'keyboard'  && <KeyboardTab />}
       {tab === 'hardware'  && <HardwareTab />}
       {tab === 'general'   && isAdmin && <GeneralTab />}
+      {tab === 'catalog'   && isAdmin && <CatalogTab />}
       {tab === 'locations' && isAdmin && <LocationsTab />}
       {tab === 'registers' && isAdmin && <RegistersTab />}
       {tab === 'users'     && isAdmin && <UsersTab />}

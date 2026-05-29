@@ -9,6 +9,7 @@ categoriesRouter.use(authenticate);
 
 const categorySchema = z.object({
   name: z.string().min(1),
+  productTypeId: z.string().optional(),
   parentId: z.string().optional(),
   sortOrder: z.number().int().optional(),
   color: z.string().optional(),
@@ -20,7 +21,10 @@ categoriesRouter.get('/', async (req, res, next) => {
     const categories = await prisma.category.findMany({
       where: { tenantId: req.user!.tenantId },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-      include: { children: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } },
+      include: {
+        productType: { select: { id: true, name: true } },
+        children: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] },
+      },
     });
     const roots = categories.filter((c) => !c.parentId);
     res.json({ success: true, data: roots });
